@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>기출문제 DB 뷰어</title>
+    <style>
+        body { font-family: 'Malgun Gothic', sans-serif; margin: 40px; background: #f4f7f6; }
+        .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; text-align: center; }
+        .question-block { border-bottom: 2px solid #eee; padding: 20px 0; }
+        .q-text { font-weight: bold; font-size: 1.1em; margin-bottom: 15px; white-space: pre-wrap; }
+        .choice { margin: 5px 0 5px 20px; }
+        .correct { color: #27ae60; font-weight: bold; }
+        .explanation { background: #f9f9f9; padding: 15px; border-left: 5px solid #3498db; margin-top: 15px; font-size: 0.95em; color: #555; }
+        .badge { background: #3498db; color: white; padding: 3px 8px; border-radius: 5px; font-size: 0.8em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 기출문제 데이터베이스 목록</h1>
+        {% for item in full_data %}
+        <div class="question-block">
+            <span class="badge">{{ item.info.year }}년 {{ item.info.subject }}</span>
+            <div class="q-text">{{ item.info.number }}번. {{ item.info.question_text }}</div>
+            
+            {% for choice in item.choices %}
+            <div class="choice {% if choice.is_correct %}correct{% endif %}">
+                {{ choice.number }}) {{ choice.text }} {% if choice.is_correct %} (정답) {% endif %}
+            </div>
+            {% endfor %}
+            
+            <div class="explanation">
+                <strong>[해설]</strong><br>
+                {{ item.info.explanation }}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>

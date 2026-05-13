@@ -1,0 +1,24 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+
+# DB & uploads
+backend/*.db
+backend/images/
+backend/pdfs/
+pdfs/
+
+# Node
+frontend/node_modules/
+backend/node_modules/
+backend/package.json
+backend/package-lock.json
+
+# Build output
+frontend/dist/
+
+# Misc
+.claude/
+*.log

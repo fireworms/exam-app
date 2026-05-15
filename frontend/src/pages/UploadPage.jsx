@@ -17,11 +17,12 @@ const REGIONS = [
 ];
 
 export default function UploadPage() {
-  const [files, setFiles] = useState([]); // 분석 결과 목록
+  const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [done, setDone] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [parser, setParser] = useState("claude");
   const fileInputRef = useRef();
 
   const handleFiles = async (selectedFiles) => {
@@ -75,6 +76,7 @@ export default function UploadPage() {
           items: toUpload.map((f) => ({
             filename: f.filename,
             exam_info: f.parsed,
+            parser,
           })),
         }),
       });
@@ -156,12 +158,26 @@ export default function UploadPage() {
         <>
           <div style={styles.listHeader}>
             <span style={styles.listCount}>{files.length}개 파일 분석됨</span>
-            <button
-              style={styles.resetBtn}
-              onClick={() => { setFiles([]); setDone(false); }}
-            >
-              다시 선택
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 13, color: "#64748b" }}>파서</span>
+              <div style={styles.parserToggle}>
+                {[{ value: "claude", label: "Claude" }, { value: "gemini", label: "Gemini" }].map(({ value, label }) => (
+                  <button
+                    key={value}
+                    style={{ ...styles.parserBtn, ...(parser === value ? styles.parserBtnActive : {}) }}
+                    onClick={() => setParser(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <button
+                style={styles.resetBtn}
+                onClick={() => { setFiles([]); setDone(false); }}
+              >
+                다시 선택
+              </button>
+            </div>
           </div>
 
           <div style={styles.fileList}>
@@ -480,5 +496,26 @@ const styles = {
   confirmBtnDisabled: {
     background: "#c7d2fe",
     cursor: "not-allowed",
+  },
+
+  parserToggle: {
+    display: "flex",
+    border: "1px solid #e2e8f0",
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  parserBtn: {
+    padding: "8px 16px",
+    border: "none",
+    background: "#f8fafc",
+    color: "#64748b",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 500,
+  },
+  parserBtnActive: {
+    background: "#6366f1",
+    color: "#fff",
+    fontWeight: 700,
   },
 };

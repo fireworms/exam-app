@@ -10,7 +10,13 @@ import sqlite3
 import random
 import secrets
 import os
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
+
+KST = timezone(timedelta(hours=9))
+
+def now_kst() -> str:
+    return datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
@@ -454,9 +460,9 @@ def update_settings(req: SettingsRequest):
     conn = get_db()
     c = conn.cursor()
     c.execute("""
-        UPDATE settings SET auto_remove_wrong = ?, updated_at = CURRENT_TIMESTAMP
+        UPDATE settings SET auto_remove_wrong = ?, updated_at = ?
         WHERE id = 1
-    """, (1 if req.auto_remove_wrong else 0,))
+    """, (1 if req.auto_remove_wrong else 0, now_kst()))
     conn.commit()
     conn.close()
     return {"success": True}
@@ -583,9 +589,9 @@ def end_session(session_id: int, req: SessionEndRequest):
     conn = get_db()
     c = conn.cursor()
     c.execute("""
-        UPDATE sessions SET correct_count=?, skipped_count=?, duration=?, ended_at=CURRENT_TIMESTAMP
+        UPDATE sessions SET correct_count=?, skipped_count=?, duration=?, ended_at=?
         WHERE id=?
-    """, (req.correct_count, req.skipped_count, req.duration, session_id))
+    """, (req.correct_count, req.skipped_count, req.duration, now_kst(), session_id))
     conn.commit()
     conn.close()
     return {"success": True}

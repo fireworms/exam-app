@@ -4,21 +4,30 @@ import json
 import sqlite3
 import time
 import threading
-from datetime import datetime
+import base64
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from google import genai
 from google.genai import types
+import anthropic
+import fitz
 from dotenv import load_dotenv
+
+KST = timezone(timedelta(hours=9))
+
+def now_kst() -> str:
+    return datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+claude_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL_ID = "gemini-3-flash-preview"
 DB_PATH = os.path.join(BASE_DIR, "exam_g.db")
 PDF_TEMP_DIR = os.path.join(BASE_DIR, "pdfs", "temp")
@@ -155,38 +164,69 @@ def is_duplicate(filename: str) -> bool:
 
 # ── Gemini 파싱 (parse_pdf_g.py 로직 재사용) ──────────────────────────────
 
-def parse_with_gemini(pdf_bytes: bytes) -> dict:
-    prompt = """이 시험지 PDF를 분석해서 모든 문제를 파싱해주세요.
-    반드시 다음 JSON 구조를 지켜야 하며, 다른 텍스트는 포함하지 마세요.
-    사료와 지문은 생략(중략) 없이 전문을 다 포함해야 합니다.
+PARSE_PROMPT = """이 시험지를 분석해서 모든 문제를 파싱해주세요.
+반드시 다음 JSON 구조를 지켜야 하며, 다른 텍스트는 포함하지 마세요.
+지문/사료/표/코드 등 문제에 포함된 모든 내용은 생략 없이 전문을 포함해야 합니다.
 
+{
+  "questions": [
     {
-      "questions": [
-        {
-          "number": 1,
-          "question_text": "문제와 사료 전문",
-          "choices": [
-            {"number": 1, "text": "선지1", "is_correct": false},
-            {"number": 2, "text": "선지2", "is_correct": true},
-            {"number": 3, "text": "선지3", "is_correct": false},
-            {"number": 4, "text": "선지4", "is_correct": false}
-          ],
-          "explanation": "정답에 대한 상세 해설. 왜 정답인지, 각 오답은 왜 틀렸는지 설명"
-        }
-      ]
+      "number": 1,
+      "question_text": "문제 전체 텍스트 (지문, 사료, 코드, 표 등 포함)",
+      "choices": [
+        {"number": 1, "text": "선지1", "is_correct": false},
+        {"number": 2, "text": "선지2", "is_correct": true},
+        {"number": 3, "text": "선지3", "is_correct": false},
+        {"number": 4, "text": "선지4", "is_correct": false}
+      ],
+      "explanation": "정답과 오답에 대한 상세 해설"
     }
+  ]
+}
 
-    해설(explanation) 작성 가이드라인 (반드시 준수):
-    - 해설은 전문가 수준으로 상세하게 작성해주세요
-    - 각 오답 선지가 왜 틀렸는지도 전문가 수준으로 설명해주세요
-    """
+주의사항:
+- 정답은 ❶❷❸❹ 기호, 굵게 표시, 또는 답안표 등 시험지마다 표시 방식이 다를 수 있으니 정확히 파악해주세요
+- 과목에 맞는 전문 지식을 활용해 해설을 작성해주세요 (한국사, 영어, 컴퓨터일반, 정보보호론, 국어 등)
+- 해설은 전문가 수준으로 상세하게 작성해주세요
+- 각 오답 선지가 왜 틀렸는지도 전문가 수준으로 설명해주세요
+"""
+
+
+def parse_with_claude(pdf_bytes: bytes) -> dict:
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    content = []
+    for page in doc:
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+        img_b64 = base64.standard_b64encode(pix.tobytes("png")).decode()
+        content.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": img_b64}
+        })
+    doc.close()
+    content.append({"type": "text", "text": PARSE_PROMPT})
+
+    response = claude_client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=16000,
+        messages=[{"role": "user", "content": content}]
+    )
+    raw = response.content[0].text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return json.loads(raw.strip())
+
+
+def parse_with_gemini(pdf_bytes: bytes) -> dict:
+    prompt = PARSE_PROMPT
 
     max_retries = 5
     retry_delay = 10
 
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(
+            response = gemini_client.models.generate_content(
                 model=MODEL_ID,
                 contents=[
                     types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
@@ -197,6 +237,11 @@ def parse_with_gemini(pdf_bytes: bytes) -> dict:
                     temperature=0.1
                 )
             )
+            if response.text is None:
+                finish_reason = None
+                if response.candidates:
+                    finish_reason = response.candidates[0].finish_reason
+                raise Exception(f"모델 응답 없음 (finish_reason: {finish_reason})")
             return json.loads(response.text)
         except Exception as e:
             # 에러 메시지나 객체 속성에서 429(할당량 초과) 또는 503(서버 부하) 확인
@@ -259,23 +304,25 @@ def update_log(log_id: int, status: str, error_msg: str = None, exam_id: int = N
     conn = sqlite3.connect(DB_PATH, timeout=30)
     c = conn.cursor()
     c.execute(
-        "UPDATE upload_logs SET status=?, error_msg=?, exam_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-        (status, error_msg, exam_id, log_id)
+        "UPDATE upload_logs SET status=?, error_msg=?, exam_id=?, updated_at=? WHERE id=?",
+        (status, error_msg, exam_id, now_kst(), log_id)
     )
     conn.commit()
     conn.close()
 
 
-def background_parse(log_id: int, pdf_path: str, exam_info: dict, source_file: str):
+def background_parse(log_id: int, pdf_path: str, exam_info: dict, source_file: str, parser: str = "claude"):
     """백그라운드 스레드에서 실행"""
     try:
         update_log(log_id, "processing")
         with open(pdf_path, "rb") as f:
             pdf_bytes = f.read()
-        data = parse_with_gemini(pdf_bytes)
+        if parser == "gemini":
+            data = parse_with_gemini(pdf_bytes)
+        else:
+            data = parse_with_claude(pdf_bytes)
         exam_id = save_to_db(exam_info, data, source_file)
         update_log(log_id, "done", exam_id=exam_id)
-        # 임시 파일 삭제
         os.remove(pdf_path)
     except Exception as e:
         update_log(log_id, "failed", error_msg=str(e))
@@ -297,6 +344,7 @@ class ExamInfo(BaseModel):
 class ConfirmItem(BaseModel):
     filename: str
     exam_info: ExamInfo
+    parser: str = "claude"
 
 
 class ConfirmRequest(BaseModel):
@@ -345,25 +393,39 @@ async def confirm_upload(req: ConfirmRequest):
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute(
-            "INSERT INTO upload_logs (source_file, status) VALUES (?, 'pending')",
-            (filename,)
+            "INSERT INTO upload_logs (source_file, status, created_at, updated_at) VALUES (?, 'pending', ?, ?)",
+            (filename, now_kst(), now_kst())
         )
         log_id = c.lastrowid
         conn.commit()
         conn.close()
 
         exam_info = item.exam_info.dict()
-        started.append({"filename": filename, "log_id": log_id, "temp_path": temp_path, "exam_info": exam_info})
+        started.append({"filename": filename, "log_id": log_id, "temp_path": temp_path, "exam_info": exam_info, "parser": item.parser})
 
-    # 순차 처리 - 15초 간격으로 하나씩 실행
     def run_sequential(jobs):
         for i, job in enumerate(jobs):
             if i > 0:
                 time.sleep(15)
-            background_parse(job["log_id"], job["temp_path"], job["exam_info"], job["filename"])
+            background_parse(job["log_id"], job["temp_path"], job["exam_info"], job["filename"], job["parser"])
 
-    t = threading.Thread(target=run_sequential, args=(started,), daemon=True)
-    t.start()
+    def run_parallel(jobs):
+        threads = [
+            threading.Thread(
+                target=background_parse,
+                args=(job["log_id"], job["temp_path"], job["exam_info"], job["filename"], job["parser"]),
+                daemon=True
+            )
+            for job in jobs
+        ]
+        for t in threads:
+            t.start()
+
+    use_gemini = any(job["parser"] == "gemini" for job in started)
+    if use_gemini:
+        threading.Thread(target=run_sequential, args=(started,), daemon=True).start()
+    else:
+        run_parallel(started)
 
     return {"started": [{"filename": s["filename"], "log_id": s["log_id"]} for s in started]}
 

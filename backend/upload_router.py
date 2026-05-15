@@ -13,14 +13,15 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 
-load_dotenv()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 MODEL_ID = "gemini-3-flash-preview"
-DB_PATH = "exam_g.db"
-PDF_TEMP_DIR = "pdfs/temp"
+DB_PATH = os.path.join(BASE_DIR, "exam_g.db")
+PDF_TEMP_DIR = os.path.join(BASE_DIR, "pdfs", "temp")
 
 os.makedirs(PDF_TEMP_DIR, exist_ok=True)
 

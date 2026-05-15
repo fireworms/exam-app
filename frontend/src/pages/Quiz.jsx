@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import axios from 'axios'
-
-const API = 'http://localhost:8008'
+import API from '../api'
 
 export default function Quiz() {
   const [searchParams] = useSearchParams()

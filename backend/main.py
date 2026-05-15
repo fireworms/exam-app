@@ -10,11 +10,14 @@ import sqlite3
 import random
 import secrets
 import os
+from dotenv import load_dotenv
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+
 from upload_router import router as upload_router
 from edit_router import router as edit_router
-os.makedirs("images", exist_ok=True)
-from dotenv import load_dotenv
-load_dotenv()
+os.makedirs(os.path.join(BASE_DIR, "images"), exist_ok=True)
 
 
 app = FastAPI()
@@ -55,7 +58,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DB_PATH = "exam_g.db"
+DB_PATH = os.path.join(BASE_DIR, "exam_g.db")
 
 
 def get_db():
@@ -477,24 +480,63 @@ def get_exams():
 def migrate_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("""
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS exams (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            year INTEGER, month INTEGER, day INTEGER,
+            subject TEXT, grade TEXT, region TEXT, source_file TEXT
+        );
+        CREATE TABLE IF NOT EXISTS questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            exam_id INTEGER, number INTEGER,
+            question_text TEXT, question_image TEXT, explanation TEXT,
+            FOREIGN KEY (exam_id) REFERENCES exams(id)
+        );
+        CREATE TABLE IF NOT EXISTS choices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question_id INTEGER, number INTEGER,
+            text TEXT, is_correct INTEGER DEFAULT 0,
+            FOREIGN KEY (question_id) REFERENCES questions(id)
+        );
+        CREATE TABLE IF NOT EXISTS solve_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question_id INTEGER, selected_choice INTEGER,
+            is_correct INTEGER, time_taken INTEGER DEFAULT 0,
+            session_id INTEGER,
+            solved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (question_id) REFERENCES questions(id)
+        );
+        CREATE TABLE IF NOT EXISTS wrong_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question_id INTEGER UNIQUE, is_dismissed INTEGER DEFAULT 0,
+            memo TEXT DEFAULT '', added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (question_id) REFERENCES questions(id)
+        );
+        CREATE TABLE IF NOT EXISTS scraps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question_id INTEGER UNIQUE, memo TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (question_id) REFERENCES questions(id)
+        );
         CREATE TABLE IF NOT EXISTS sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mode TEXT,
-            subject TEXT,
-            exam_id INTEGER,
-            total_count INTEGER DEFAULT 0,
-            correct_count INTEGER DEFAULT 0,
-            skipped_count INTEGER DEFAULT 0,
-            duration INTEGER DEFAULT 0,
-            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            ended_at TIMESTAMP
-        )
+            mode TEXT, subject TEXT, exam_id INTEGER,
+            total_count INTEGER DEFAULT 0, correct_count INTEGER DEFAULT 0,
+            skipped_count INTEGER DEFAULT 0, duration INTEGER DEFAULT 0,
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, ended_at TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS settings (
+            id INTEGER PRIMARY KEY DEFAULT 1,
+            auto_remove_wrong INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT OR IGNORE INTO settings (id, auto_remove_wrong) VALUES (1, 0);
     """)
-    existing = [row[1] for row in c.execute("PRAGMA table_info(solve_history)")]
-    if "time_taken" not in existing:
+    existing_sh = [row[1] for row in c.execute("PRAGMA table_info(solve_history)")]
+    if "time_taken" not in existing_sh:
         c.execute("ALTER TABLE solve_history ADD COLUMN time_taken INTEGER DEFAULT 0")
-    if "session_id" not in existing:
+    if "session_id" not in existing_sh:
         c.execute("ALTER TABLE solve_history ADD COLUMN session_id INTEGER")
     existing_wn = [row[1] for row in c.execute("PRAGMA table_info(wrong_notes)")]
     if "memo" not in existing_wn:

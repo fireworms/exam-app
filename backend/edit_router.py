@@ -7,8 +7,9 @@ from typing import Optional, List
 
 router = APIRouter(prefix="/questions", tags=["edit"])
 
-DB_PATH = "exam_g.db"
-IMAGE_DIR = "images"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "exam_g.db")
+IMAGE_DIR = os.path.join(BASE_DIR, "images")
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
 

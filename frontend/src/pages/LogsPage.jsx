@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
-
-const API = "http://localhost:8008";
+import API from "../api";
 
 const STATUS_MAP = {
   pending:    { label: "대기 중",   color: "#f59e0b", bg: "#fffbeb" },

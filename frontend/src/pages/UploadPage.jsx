@@ -1,6 +1,5 @@
 import { useState, useRef } from "react";
-
-const API = "http://localhost:8008";
+import API from "../api";
 
 const SUBJECTS = [
   "한국사", "국어", "영어", "수학", "행정법총론", "행정학개론",

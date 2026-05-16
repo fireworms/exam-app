@@ -430,6 +430,61 @@ async def confirm_upload(req: ConfirmRequest):
     return {"started": [{"filename": s["filename"], "log_id": s["log_id"]} for s in started]}
 
 
+class ChoiceItem(BaseModel):
+    number: int
+    text: str
+    is_correct: bool = False
+
+
+class QuestionItem(BaseModel):
+    number: int
+    question_text: str
+    choices: List[ChoiceItem]
+    explanation: Optional[str] = ""
+
+
+class ExamMeta(BaseModel):
+    year: Optional[int] = None
+    month: Optional[int] = None
+    day: Optional[int] = None
+    subject: str = ""
+    grade: str = ""
+    region: str = ""
+    source_file: str = "AI예상문제"
+
+
+class JsonImportRequest(BaseModel):
+    exam: ExamMeta
+    questions: List[QuestionItem]
+
+
+@router.post("/json")
+async def import_json(req: JsonImportRequest):
+    """JSON 파일 직접 임포트 — AI 파싱 없이 바로 DB에 저장"""
+    init_upload_schema()
+
+    exam_info = req.exam.dict()
+    source_file = exam_info.get("source_file") or "AI예상문제"
+
+    data = {"questions": [q.dict() for q in req.questions]}
+
+    try:
+        exam_id = save_to_db(exam_info, data, source_file)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB 저장 실패: {e}")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO upload_logs (source_file, status, exam_id, created_at, updated_at) VALUES (?, 'done', ?, ?, ?)",
+        (source_file, exam_id, now_kst(), now_kst())
+    )
+    conn.commit()
+    conn.close()
+
+    return {"exam_id": exam_id, "question_count": len(req.questions)}
+
+
 @router.get("/logs")
 async def get_logs():
     """업로드 로그 목록 조회"""

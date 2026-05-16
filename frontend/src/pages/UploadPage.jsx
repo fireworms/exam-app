@@ -1,6 +1,31 @@
 import { useState, useRef } from "react";
 import API from "../api";
 
+const JSON_FORMAT_TEMPLATE = `{
+  "exam": {
+    "year": 2026,
+    "month": 4,
+    "day": 5,
+    "subject": "영어",
+    "grade": "9급",
+    "region": "국가직",
+    "source_file": "AI예상문제_2026_9급국가직영어"
+  },
+  "questions": [
+    {
+      "number": 1,
+      "question_text": "문제 전체 텍스트 (지문, 사료, 코드, 표 등 모두 포함)",
+      "choices": [
+        {"number": 1, "text": "선지1", "is_correct": false},
+        {"number": 2, "text": "선지2", "is_correct": true},
+        {"number": 3, "text": "선지3", "is_correct": false},
+        {"number": 4, "text": "선지4", "is_correct": false}
+      ],
+      "explanation": "정답과 오답에 대한 상세 해설 (오답 선지별 이유 포함)"
+    }
+  ]
+}`;
+
 const SUBJECTS = [
   "한국사", "국어", "영어", "수학", "행정법총론", "행정학개론",
   "사회", "과학", "컴퓨터일반", "정보보호론", "세법개론", "회계학",
@@ -17,6 +42,9 @@ const REGIONS = [
 ];
 
 export default function UploadPage() {
+  const [tab, setTab] = useState("pdf");
+
+  // PDF 탭 상태
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -24,6 +52,81 @@ export default function UploadPage() {
   const [dragging, setDragging] = useState(false);
   const [parser, setParser] = useState("claude");
   const fileInputRef = useRef();
+
+  // JSON 탭 상태 — items: [{name, parsed, status: 'pending'|'done'|'error', result, error}]
+  const [jsonItems, setJsonItems] = useState([]);
+  const [jsonImporting, setJsonImporting] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const jsonInputRef = useRef();
+
+  const readJsonFile = (file) =>
+    new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const parsed = JSON.parse(e.target.result);
+          if (!parsed.exam || !Array.isArray(parsed.questions)) {
+            resolve({ name: file.name, parsed: null, status: "error", error: "형식 오류: exam + questions 필요" });
+          } else {
+            resolve({ name: file.name, parsed, status: "pending" });
+          }
+        } catch {
+          resolve({ name: file.name, parsed: null, status: "error", error: "JSON 파싱 실패" });
+        }
+      };
+      reader.readAsText(file);
+    });
+
+  const handleJsonFiles = async (files) => {
+    const jsonFiles = Array.from(files).filter((f) => f.name.endsWith(".json"));
+    if (!jsonFiles.length) return;
+    const items = await Promise.all(jsonFiles.map(readJsonFile));
+    setJsonItems((prev) => {
+      const existingNames = new Set(prev.map((i) => i.name));
+      return [...prev, ...items.filter((i) => !existingNames.has(i.name))];
+    });
+  };
+
+  const removeJsonItem = (name) =>
+    setJsonItems((prev) => prev.filter((i) => i.name !== name));
+
+  const handleJsonImportAll = async () => {
+    const pending = jsonItems.filter((i) => i.status === "pending");
+    if (!pending.length) return;
+    setJsonImporting(true);
+    for (const item of pending) {
+      setJsonItems((prev) =>
+        prev.map((i) => (i.name === item.name ? { ...i, status: "uploading" } : i))
+      );
+      try {
+        const res = await fetch(`${API}/upload/json`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(item.parsed),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "서버 오류");
+        }
+        const data = await res.json();
+        setJsonItems((prev) =>
+          prev.map((i) => (i.name === item.name ? { ...i, status: "done", result: data } : i))
+        );
+      } catch (e) {
+        setJsonItems((prev) =>
+          prev.map((i) => (i.name === item.name ? { ...i, status: "error", error: e.message } : i))
+        );
+      }
+    }
+    setJsonImporting(false);
+  };
+
+  const handleCopyFormat = () => {
+    navigator.clipboard.writeText(JSON_FORMAT_TEMPLATE).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   const handleFiles = async (selectedFiles) => {
     if (!selectedFiles.length) return;
@@ -97,9 +200,137 @@ export default function UploadPage() {
   return (
     <div style={styles.page}>
       <div style={styles.header}>
-        <h1 style={styles.title}>PDF 업로드</h1>
-        <p style={styles.subtitle}>시험지를 업로드하면 자동으로 파싱해서 DB에 저장돼요</p>
+        <h1 style={styles.title}>문제 업로드</h1>
+        <p style={styles.subtitle}>PDF 자동 파싱 또는 AI 생성 JSON 직접 가져오기</p>
       </div>
+
+      {/* 탭 */}
+      <div style={styles.tabBar}>
+        <button
+          style={{ ...styles.tabBtn, ...(tab === "pdf" ? styles.tabBtnActive : {}) }}
+          onClick={() => setTab("pdf")}
+        >
+          PDF 업로드
+        </button>
+        <button
+          style={{ ...styles.tabBtn, ...(tab === "json" ? styles.tabBtnActive : {}) }}
+          onClick={() => setTab("json")}
+        >
+          JSON 가져오기
+        </button>
+      </div>
+
+      {/* JSON 탭 */}
+      {tab === "json" && (
+        <div>
+          {/* JSON 형식 안내 */}
+          <div style={styles.formatBox}>
+            <div style={styles.formatHeader}>
+              <span style={styles.formatTitle}>Claude AI에게 줄 JSON 형식</span>
+              <button style={styles.copyBtn} onClick={handleCopyFormat}>
+                {copied ? "복사됨!" : "형식 복사"}
+              </button>
+            </div>
+            <pre style={styles.formatPre}>{JSON_FORMAT_TEMPLATE}</pre>
+          </div>
+
+          {/* 드롭존 (항상 표시) */}
+          <div
+            style={styles.dropzone}
+            onClick={() => jsonInputRef.current.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); handleJsonFiles(e.dataTransfer.files); }}
+          >
+            <input
+              ref={jsonInputRef}
+              type="file"
+              accept=".json"
+              multiple
+              style={{ display: "none" }}
+              onChange={(e) => { handleJsonFiles(e.target.files); e.target.value = ""; }}
+            />
+            <div style={styles.dropIcon}>📄</div>
+            <div style={styles.dropText}>JSON 파일을 드래그하거나 클릭해서 선택</div>
+            <div style={styles.dropSub}>여러 파일 동시 선택 가능</div>
+          </div>
+
+          {/* 파일 목록 */}
+          {jsonItems.length > 0 && (
+            <>
+              <div style={{ ...styles.listHeader, marginTop: 20 }}>
+                <span style={styles.listCount}>{jsonItems.length}개 파일</span>
+                <button style={styles.resetBtn} onClick={() => setJsonItems([])}>
+                  모두 제거
+                </button>
+              </div>
+
+              <div style={styles.fileList}>
+                {jsonItems.map((item) => (
+                  <div
+                    key={item.name}
+                    style={{
+                      ...styles.fileCard,
+                      ...(item.status === "error" ? styles.fileCardDup : {}),
+                      ...(item.status === "done" ? styles.fileCardDone : {}),
+                    }}
+                  >
+                    <div style={styles.cardTop}>
+                      <div>
+                        {item.status === "done" && <span style={styles.doneBadge}>완료</span>}
+                        {item.status === "error" && <span style={styles.dupBadge}>오류</span>}
+                        {item.status === "uploading" && <span style={styles.uploadingBadge}>저장중</span>}
+                        <strong style={{ fontSize: 13, marginLeft: item.status !== "pending" ? 8 : 0 }}>
+                          {item.name}
+                        </strong>
+                        {item.parsed && (
+                          <span style={styles.previewMeta}>
+                            {" "}— {item.parsed.exam?.subject} {item.parsed.exam?.grade}{" "}
+                            {item.parsed.exam?.region} {item.parsed.exam?.year}년{" "}
+                            · {item.parsed.questions?.length}문제
+                          </span>
+                        )}
+                        {item.status === "done" && item.result && (
+                          <span style={styles.previewMeta}> (exam_id: {item.result.exam_id})</span>
+                        )}
+                        {item.status === "error" && (
+                          <span style={{ color: "#dc2626", fontSize: 12, marginLeft: 8 }}>{item.error}</span>
+                        )}
+                      </div>
+                      {item.status !== "uploading" && (
+                        <button style={styles.resetBtn} onClick={() => removeJsonItem(item.name)}>
+                          제거
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 전체 저장 버튼 */}
+              {(() => {
+                const pendingCount = jsonItems.filter((i) => i.status === "pending").length;
+                return pendingCount > 0 ? (
+                  <div style={{ ...styles.confirmWrap, marginTop: 20 }}>
+                    <span style={styles.confirmInfo}>
+                      {pendingCount}개 저장 대기
+                    </span>
+                    <button
+                      style={{ ...styles.confirmBtn, ...(jsonImporting ? styles.confirmBtnDisabled : {}) }}
+                      onClick={handleJsonImportAll}
+                      disabled={jsonImporting}
+                    >
+                      {jsonImporting ? "저장 중..." : `${pendingCount}개 바로 저장`}
+                    </button>
+                  </div>
+                ) : null;
+              })()}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* PDF 탭 */}
+      {tab === "pdf" && <>
 
       {/* 완료 메시지 */}
       {done && (
@@ -312,6 +543,7 @@ export default function UploadPage() {
           </div>
         </>
       )}
+      </>}
     </div>
   );
 }
@@ -325,9 +557,95 @@ const styles = {
     fontFamily: "'Noto Sans KR', sans-serif",
     color: "#1a1a2e",
   },
-  header: { marginBottom: 32 },
+  header: { marginBottom: 24 },
   title: { fontSize: 26, fontWeight: 700, margin: 0 },
   subtitle: { marginTop: 6, color: "#666", fontSize: 14 },
+
+  tabBar: {
+    display: "flex",
+    gap: 4,
+    marginBottom: 28,
+    borderBottom: "2px solid #e2e8f0",
+  },
+  tabBtn: {
+    padding: "10px 20px",
+    border: "none",
+    background: "none",
+    cursor: "pointer",
+    fontSize: 14,
+    fontWeight: 600,
+    color: "#94a3b8",
+    borderBottom: "2px solid transparent",
+    marginBottom: -2,
+  },
+  tabBtnActive: {
+    color: "#6366f1",
+    borderBottom: "2px solid #6366f1",
+  },
+
+  formatBox: {
+    background: "#0f172a",
+    borderRadius: 12,
+    marginBottom: 20,
+    overflow: "hidden",
+  },
+  formatHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "12px 16px",
+    borderBottom: "1px solid #1e293b",
+  },
+  formatTitle: { color: "#94a3b8", fontSize: 13, fontWeight: 600 },
+  copyBtn: {
+    background: "#6366f1",
+    color: "#fff",
+    border: "none",
+    borderRadius: 6,
+    padding: "6px 14px",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  formatPre: {
+    margin: 0,
+    padding: "16px",
+    color: "#e2e8f0",
+    fontSize: 12,
+    lineHeight: 1.6,
+    overflowX: "auto",
+    fontFamily: "monospace",
+  },
+
+  errorBox: {
+    background: "#fef2f2",
+    border: "1px solid #fca5a5",
+    borderRadius: 10,
+    padding: "12px 16px",
+    color: "#dc2626",
+    fontSize: 13,
+    marginBottom: 16,
+  },
+
+  previewMeta: { fontSize: 13, color: "#64748b", fontWeight: 400 },
+
+  doneBadge: {
+    background: "#dcfce7",
+    color: "#16a34a",
+    borderRadius: 6,
+    padding: "2px 8px",
+    fontSize: 11,
+    fontWeight: 700,
+  },
+  uploadingBadge: {
+    background: "#e0e7ff",
+    color: "#4338ca",
+    borderRadius: 6,
+    padding: "2px 8px",
+    fontSize: 11,
+    fontWeight: 700,
+  },
+  fileCardDone: { borderColor: "#bbf7d0", background: "#f0fdf4" },
 
   doneBox: {
     display: "flex",

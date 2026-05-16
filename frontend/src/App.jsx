@@ -9,6 +9,16 @@ import UploadPage from "./pages/UploadPage";
 import LogsPage from "./pages/LogsPage";
 import EditQuestion from './pages/EditQuestion'
 import Stats from './pages/Stats'
+import LearnLayout from './pages/learn/LearnLayout'
+import Dashboard from './pages/learn/Dashboard'
+import AreaList from './pages/learn/AreaList'
+import AreaDetail from './pages/learn/AreaDetail'
+import Traps from './pages/learn/Traps'
+import Grammar from './pages/learn/Grammar'
+import ExamMapping from './pages/learn/ExamMapping'
+import Priority from './pages/learn/Priority'
+import Checklist from './pages/learn/Checklist'
+import Bookmarks from './pages/learn/Bookmarks'
 import './index.css'
 
 function QuizWithKey() {
@@ -30,6 +40,17 @@ export default function App() {
           <Route path="/logs" element={<LogsPage />} />
           <Route path="edit/:question_id" element={<EditQuestion />} />
           <Route path="stats" element={<Stats />} />
+          <Route path="learn" element={<LearnLayout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="areas" element={<AreaList />} />
+            <Route path="areas/:areaKey" element={<AreaDetail />} />
+            <Route path="traps" element={<Traps />} />
+            <Route path="grammar" element={<Grammar />} />
+            <Route path="exam-mapping" element={<ExamMapping />} />
+            <Route path="priority" element={<Priority />} />
+            <Route path="checklist" element={<Checklist />} />
+            <Route path="bookmarks" element={<Bookmarks />} />
+          </Route>
         </Route>
       </Routes>
     </BrowserRouter>

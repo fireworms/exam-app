@@ -1,4 +1,19 @@
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&family=JetBrains+Mono:wght@400;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0f0f13;
+  --color-bg2: #16161d;
+  --color-bg3: #1e1e28;
+  --color-lborder: #2a2a38;
+  --color-muted: #8888aa;
+  --color-accent: #7c6af7;
+  --color-accent2: #a89bf9;
+  --color-success: #4ade80;
+  --color-danger: #f87171;
+  --color-warn: #fbbf24;
+  --font-sans: 'Noto Sans KR', sans-serif;
+}
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 

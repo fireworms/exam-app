@@ -23,6 +23,7 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 from upload_router import router as upload_router
 from edit_router import router as edit_router
+from learning_router import router as learning_router
 os.makedirs(os.path.join(BASE_DIR, "images"), exist_ok=True)
 
 
@@ -55,6 +56,7 @@ def verify(request: Request, credentials: HTTPBasicCredentials = Depends(HTTPBas
 
 app.include_router(upload_router)
 app.include_router(edit_router)
+app.include_router(learning_router)
 
 app.add_middleware(
     CORSMiddleware,

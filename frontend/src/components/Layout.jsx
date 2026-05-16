@@ -5,6 +5,7 @@ const links = [
   { to: '/quiz', label: '문제풀기', icon: '✎' },
   { to: '/wrong-notes', label: '오답노트', icon: '✗' },
   { to: '/scraps', label: '스크랩', icon: '★' },
+  { to: '/learn', label: '학습자료', icon: '📖' },
   { to: '/stats', label: '통계', icon: '📊' },
   { to: '/settings', label: '설정', icon: '⚙' },
 ]

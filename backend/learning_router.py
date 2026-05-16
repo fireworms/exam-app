@@ -28,32 +28,14 @@ def _load_notes():
 
 _load_notes()
 
-AREA_KEY_MAP = {
-    "비문학 추론": "nonfiction_inference",
-    "논리 추론 (참/거짓·명제)": "logical_reasoning",
-    "공문서 수정·개요 작성": ["public_document_correction", "outline_writing"],
-    "강화/약화 평가": "strengthen_weaken",
-    "글의 흐름 배열": "passage_ordering",
-    "문맥상 어색한 부분 수정": "awkward_revision",
-    "대화·견해 분석": "dialogue_analysis",
-    "어휘 바꿔쓰기": "vocabulary_substitution",
-    "문법 (활용·발음·형태소)": "grammar",
-    "지시 대상 식별": None,
-}
+def _area_order(notes: dict) -> list[str]:
+    """area_details의 JSON 키 순서를 그대로 사용"""
+    return list(notes.get("area_details", {}).keys())
 
-ORDERED_AREA_KEYS = [
-    "public_document_correction",
-    "outline_writing",
-    "logical_reasoning",
-    "strengthen_weaken",
-    "nonfiction_inference",
-    "common_passage",
-    "passage_ordering",
-    "awkward_revision",
-    "dialogue_analysis",
-    "vocabulary_substitution",
-    "grammar",
-]
+
+def _name_to_key(notes: dict) -> dict:
+    """area_details.name → key 역매핑 (과목 무관)"""
+    return {v.get("name", ""): k for k, v in notes.get("area_details", {}).items()}
 
 
 def _get_notes(subject: str = "국어") -> dict:
@@ -117,10 +99,10 @@ def get_meta(subject: str = "국어"):
 def get_top_areas(subject: str = "국어"):
     notes = _get_notes(subject)
     areas = notes.get("top_10_areas", [])
+    n2k = _name_to_key(notes)
     result = []
     for area in areas:
-        name = area.get("name", "")
-        key = AREA_KEY_MAP.get(name)
+        key = n2k.get(area.get("name", ""))
         result.append({**area, "area_key": key})
     return result
 
@@ -135,17 +117,15 @@ def list_areas(subject: str = "국어"):
     viewed = {r["area_key"] for r in c.fetchall()}
     conn.close()
 
-    result = []
-    for key in ORDERED_AREA_KEYS:
-        if key in details:
-            area = details[key]
-            result.append({
-                "key": key,
-                "name": area.get("name", key),
-                "position": area.get("出題_position", ""),
-                "viewed": key in viewed,
-            })
-    return result
+    return [
+        {
+            "key": key,
+            "name": area.get("name", key),
+            "position": area.get("出題_position", ""),
+            "viewed": key in viewed,
+        }
+        for key, area in details.items()
+    ]
 
 
 @router.get("/areas/{area_key}")
@@ -155,23 +135,21 @@ def get_area(area_key: str, subject: str = "국어"):
     if area_key not in details:
         raise HTTPException(status_code=404, detail=f"영역 없음: {area_key}")
 
-    # 열람 기록
+    ordered = _area_order(notes)
+    idx = ordered.index(area_key) if area_key in ordered else -1
+    prev_key = ordered[idx - 1] if idx > 0 else None
+    next_key = ordered[idx + 1] if 0 <= idx < len(ordered) - 1 else None
+
     conn = _db()
     conn.execute(
         "INSERT OR IGNORE INTO area_views (subject, area_key) VALUES (?,?)",
         (subject, area_key)
     )
     conn.commit()
-
-    # 북마크 여부
     c = conn.cursor()
     c.execute("SELECT id FROM learn_bookmarks WHERE subject=? AND type='area' AND key=?", (subject, area_key))
     bookmarked = c.fetchone() is not None
     conn.close()
-
-    idx = ORDERED_AREA_KEYS.index(area_key) if area_key in ORDERED_AREA_KEYS else -1
-    prev_key = ORDERED_AREA_KEYS[idx - 1] if idx > 0 else None
-    next_key = ORDERED_AREA_KEYS[idx + 1] if idx >= 0 and idx < len(ORDERED_AREA_KEYS) - 1 else None
 
     return {
         **details[area_key],

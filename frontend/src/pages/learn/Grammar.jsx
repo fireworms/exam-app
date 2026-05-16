@@ -1,12 +1,6 @@
 import { useEffect, useState } from "react"
+import { useSubject } from "./SubjectContext"
 import API from "../../api"
-
-const TAB_MAP = {
-  antonyms: "방향 반의어",
-  causative_passive: "사동·피동",
-  honorifics: "높임법",
-  tense_modality: "시제·양태",
-}
 
 function ValueDisplay({ val }) {
   if (!val) return null
@@ -17,10 +11,12 @@ function ValueDisplay({ val }) {
         <li key={i} className="pl-3 border-l-2 border-accent/30 text-sm text-[var(--text2)]">
           {typeof item === "string" ? item : (
             <div>
-              {item.type && <span className="font-semibold text-accent2 mr-2">{item.type}</span>}
-              {item.morpheme && <span className="font-semibold text-accent2 mr-2">{item.morpheme}</span>}
-              {item.position && <span className="font-semibold text-accent2 mr-2">{item.position}</span>}
-              {(item.definition || item.basic || item.modality || item.description || item.rule) && (
+              {(item.type || item.morpheme || item.position) && (
+                <span className="font-semibold text-accent2 mr-2">
+                  {item.type || item.morpheme || item.position}
+                </span>
+              )}
+              {(item.definition || item.basic || item.description || item.rule) && (
                 <span className="text-muted mr-2">
                   {item.definition || item.basic || item.description || item.rule}
                 </span>
@@ -59,26 +55,37 @@ function ValueDisplay({ val }) {
 }
 
 export default function Grammar() {
+  const subject = useSubject()
   const [grammar, setGrammar] = useState(null)
-  const [active, setActive] = useState("antonyms")
+  const [active, setActive] = useState(null)
 
   useEffect(() => {
-    fetch(`${API}/api/learn/grammar`).then(r => r.json()).then(setGrammar)
-  }, [])
+    setGrammar(null)
+    fetch(`${API}/api/learn/grammar?subject=${encodeURIComponent(subject)}`)
+      .then(r => r.json())
+      .then(data => {
+        setGrammar(data)
+        const keys = Object.keys(data)
+        if (keys.length) setActive(keys[0])
+      })
+  }, [subject])
 
   if (!grammar) return <div className="text-muted text-sm">로딩 중...</div>
 
-  const section = grammar[active]
+  const keys = Object.keys(grammar)
+  if (!keys.length) return <div className="text-muted text-sm py-8 text-center">문법 데이터가 없어요.</div>
+
+  const section = active ? grammar[active] : null
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-[var(--text)]">문법 기초</h1>
-        <p className="text-muted text-sm mt-1">시험 자주 나오는 문법 개념 정리</p>
+        <p className="text-muted text-sm mt-1">{subject} · 자주 나오는 문법 개념 정리</p>
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        {Object.keys(TAB_MAP).map(key => (
+        {keys.map(key => (
           <button
             key={key}
             onClick={() => setActive(key)}
@@ -88,16 +95,14 @@ export default function Grammar() {
                 : "bg-bg2 border border-lborder text-muted hover:text-[var(--text)]"
             }`}
           >
-            {TAB_MAP[key]}
+            {grammar[key]?.name || key.replace(/_/g, " ")}
           </button>
         ))}
       </div>
 
       {section && (
         <div className="bg-bg2 border border-lborder rounded-xl p-5 space-y-4">
-          {section.name && (
-            <h2 className="text-base font-bold text-[var(--text)]">{section.name}</h2>
-          )}
+          {section.name && <h2 className="text-base font-bold text-[var(--text)]">{section.name}</h2>}
           {Object.entries(section)
             .filter(([k]) => k !== "name")
             .map(([k, v]) => (

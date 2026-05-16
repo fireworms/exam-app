@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useSubject } from "./SubjectContext"
 import API from "../../api"
 
 function CheckItem({ id, text, checked, onToggle }) {
@@ -18,48 +19,53 @@ function CheckItem({ id, text, checked, onToggle }) {
 }
 
 export default function Checklist() {
+  const subject = useSubject()
   const [checklist, setChecklist] = useState(null)
   const [progress, setProgress] = useState({})
 
   useEffect(() => {
-    fetch(`${API}/api/learn/checklist`).then(r => r.json()).then(d => {
-      setChecklist(d.checklist)
-      setProgress(d.progress)
-    })
-  }, [])
+    setChecklist(null)
+    fetch(`${API}/api/learn/checklist?subject=${encodeURIComponent(subject)}`)
+      .then(r => r.json())
+      .then(d => { setChecklist(d.checklist); setProgress(d.progress) })
+  }, [subject])
 
   const toggle = async (itemId, checked) => {
     setProgress(prev => ({ ...prev, [itemId]: checked }))
     await fetch(`${API}/api/learn/progress/checklist`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ item_id: itemId, checked }),
+      body: JSON.stringify({ item_id: itemId, checked, subject }),
     })
   }
 
   const reset = async () => {
     if (!confirm("모든 체크를 초기화할까요?")) return
-    await fetch(`${API}/api/learn/progress/checklist/reset?subject=국어`, { method: "POST" })
+    await fetch(`${API}/api/learn/progress/checklist/reset?subject=${encodeURIComponent(subject)}`, { method: "POST" })
     setProgress({})
   }
 
   if (!checklist) return <div className="text-muted text-sm">로딩 중...</div>
 
-  const allItems = [
-    ...(checklist.one_week_before || []).map((t, i) => ({ id: `one_week_${i}`, text: t })),
-    ...(checklist.day_before?.must_remember || []).map((t, i) => ({ id: `must_${i}`, text: t })),
-    ...(checklist.day_before?.exam_strategy || []).map((t, i) => ({ id: `strategy_${i}`, text: t })),
+  const groups = [
+    { id: "one_week", title: "📅 시험 1주 전", items: checklist.one_week_before || [] },
+    { id: "must", title: "🔴 전날 — 절대 잊지 말 것", items: checklist.day_before?.must_remember || [], danger: true },
+    { id: "strategy", title: "⚡ 시험 당일 전략", items: checklist.day_before?.exam_strategy || [], accent: true },
   ]
+
+  const allItems = groups.flatMap(g => g.items.map((_, i) => `${g.id}_${i}`))
   const total = allItems.length
-  const done = allItems.filter(i => progress[i.id]).length
+  const done = allItems.filter(id => progress[id]).length
   const pct = total ? Math.round((done / total) * 100) : 0
+
+  if (!total) return <div className="text-muted text-sm text-center py-8">체크리스트 데이터가 없어요.</div>
 
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-[var(--text)]">시험 직전 체크리스트</h1>
-          <p className="text-muted text-sm mt-1">체크하면 자동으로 저장돼요</p>
+          <p className="text-muted text-sm mt-1">{subject} · 체크하면 자동 저장</p>
         </div>
         <button
           onClick={reset}
@@ -69,61 +75,32 @@ export default function Checklist() {
         </button>
       </div>
 
-      {/* 진행률 */}
       <div>
         <div className="flex justify-between text-xs text-muted mb-2">
           <span>전체 진행률</span>
           <span>{done}/{total} ({pct}%)</span>
         </div>
         <div className="h-2 bg-bg3 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-accent rounded-full transition-all duration-300"
-            style={{ width: `${pct}%` }}
-          />
+          <div className="h-full bg-accent rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
         </div>
       </div>
 
-      {/* 1주 전 */}
-      <div className="bg-bg2 border border-lborder rounded-xl p-5">
-        <h2 className="text-sm font-bold text-[var(--text)] mb-3">📅 시험 1주 전</h2>
-        {(checklist.one_week_before || []).map((text, i) => (
-          <CheckItem
-            key={i}
-            id={`one_week_${i}`}
-            text={text}
-            checked={!!progress[`one_week_${i}`]}
-            onToggle={toggle}
-          />
-        ))}
-      </div>
-
-      {/* 전날 - 절대 잊지 말 것 */}
-      <div className="bg-bg2 border border-lborder rounded-xl p-5">
-        <h2 className="text-sm font-bold text-danger mb-3">🔴 시험 전날 — 절대 잊지 말 것</h2>
-        {(checklist.day_before?.must_remember || []).map((text, i) => (
-          <CheckItem
-            key={i}
-            id={`must_${i}`}
-            text={text}
-            checked={!!progress[`must_${i}`]}
-            onToggle={toggle}
-          />
-        ))}
-      </div>
-
-      {/* 전날 - 시험 전략 */}
-      <div className="bg-bg2 border border-lborder rounded-xl p-5">
-        <h2 className="text-sm font-bold text-accent mb-3">⚡ 시험 당일 전략</h2>
-        {(checklist.day_before?.exam_strategy || []).map((text, i) => (
-          <CheckItem
-            key={i}
-            id={`strategy_${i}`}
-            text={text}
-            checked={!!progress[`strategy_${i}`]}
-            onToggle={toggle}
-          />
-        ))}
-      </div>
+      {groups.map(g => g.items.length > 0 && (
+        <div key={g.id} className="bg-bg2 border border-lborder rounded-xl p-5">
+          <h2 className={`text-sm font-bold mb-3 ${g.danger ? "text-danger" : g.accent ? "text-accent" : "text-[var(--text)]"}`}>
+            {g.title}
+          </h2>
+          {g.items.map((text, i) => (
+            <CheckItem
+              key={i}
+              id={`${g.id}_${i}`}
+              text={text}
+              checked={!!progress[`${g.id}_${i}`]}
+              onToggle={toggle}
+            />
+          ))}
+        </div>
+      ))}
     </div>
   )
 }

@@ -1,63 +1,68 @@
 import { useEffect, useState } from "react"
+import { useSubject } from "./SubjectContext"
 import API from "../../api"
 
-const YEARS = [2022, 2023, 2024, 2025, 2026]
-const REGIONS = ["국가직", "지방직"]
-
-function normalizeKey(key) {
-  return key.replace(/_/g, " ")
-}
+function normalizeKey(key) { return key.replace(/_/g, " ") }
 
 export default function ExamMapping() {
+  const subject = useSubject()
   const [mapping, setMapping] = useState({})
-  const [selectedAreas, setSelectedAreas] = useState([])
+  const [years, setYears] = useState([])
+  const [regions, setRegions] = useState([])
   const [selectedYears, setSelectedYears] = useState([])
   const [selectedRegions, setSelectedRegions] = useState([])
   const [query, setQuery] = useState("")
 
   useEffect(() => {
-    fetch(`${API}/api/learn/exam-mapping`).then(r => r.json()).then(d => {
-      setMapping(d.mapping || {})
-    })
-  }, [])
+    setMapping({})
+    fetch(`${API}/api/learn/exam-mapping?subject=${encodeURIComponent(subject)}`)
+      .then(r => r.json())
+      .then(d => {
+        const m = d.mapping || {}
+        setMapping(m)
+        // 연도·지역 동적 추출
+        const ys = new Set(), rs = new Set()
+        Object.values(m).forEach(roundMap => {
+          Object.keys(roundMap).forEach(rk => {
+            const [y, r] = rk.split("_")
+            if (y) ys.add(Number(y))
+            if (r) rs.add(r)
+          })
+        })
+        setYears([...ys].sort())
+        setRegions([...rs].sort())
+        setSelectedYears([]); setSelectedRegions([])
+      })
+  }, [subject])
 
-  const areaKeys = Object.keys(mapping)
+  const toggle = (arr, setArr, val) =>
+    setArr(prev => prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val])
 
-  const toggleArea = key => setSelectedAreas(prev =>
-    prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
-  )
-  const toggleYear = y => setSelectedYears(prev =>
-    prev.includes(y) ? prev.filter(v => v !== y) : [...prev, y]
-  )
-  const toggleRegion = r => setSelectedRegions(prev =>
-    prev.includes(r) ? prev.filter(v => v !== r) : [...prev, r]
-  )
-
-  const filteredAreas = areaKeys.filter(k =>
-    (!query || normalizeKey(k).includes(query)) &&
-    (!selectedAreas.length || selectedAreas.includes(k))
+  const areaKeys = Object.keys(mapping).filter(k =>
+    !query || normalizeKey(k).includes(query)
   )
 
   const getResults = (areaKey) => {
-    const areaData = mapping[areaKey] || {}
-    const results = []
-    Object.entries(areaData).forEach(([roundKey, qnums]) => {
-      const [year, region] = roundKey.split("_")
-      if (selectedYears.length && !selectedYears.includes(Number(year))) return
-      if (selectedRegions.length && !selectedRegions.includes(region)) return
-      results.push({ roundKey, year, region, qnums })
-    })
-    return results
+    return Object.entries(mapping[areaKey] || {})
+      .filter(([rk]) => {
+        const [y, r] = rk.split("_")
+        if (selectedYears.length && !selectedYears.includes(Number(y))) return false
+        if (selectedRegions.length && !selectedRegions.includes(r)) return false
+        return true
+      })
+      .map(([rk, qnums]) => {
+        const [year, region] = rk.split("_")
+        return { rk, year, region, qnums }
+      })
   }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-[var(--text)]">회차 매핑</h1>
-        <p className="text-muted text-sm mt-1">영역별로 어느 회차 어느 번호에 출제됐는지 확인</p>
+        <p className="text-muted text-sm mt-1">{subject} · 영역별 출제 회차 및 번호 확인</p>
       </div>
 
-      {/* 필터 */}
       <div className="bg-bg2 border border-lborder rounded-xl p-4 space-y-4">
         <input
           className="w-full bg-bg3 border border-lborder rounded-lg px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-accent/50 placeholder:text-muted"
@@ -65,45 +70,39 @@ export default function ExamMapping() {
           value={query}
           onChange={e => setQuery(e.target.value)}
         />
-
-        <div>
-          <p className="text-xs text-muted mb-2 font-semibold">연도</p>
-          <div className="flex gap-2 flex-wrap">
-            {YEARS.map(y => (
-              <button
-                key={y}
-                onClick={() => toggleYear(y)}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  selectedYears.includes(y) ? "bg-accent text-white" : "bg-bg3 text-muted hover:text-[var(--text)]"
-                }`}
-              >
-                {y}
-              </button>
-            ))}
+        {years.length > 0 && (
+          <div>
+            <p className="text-xs text-muted mb-2 font-semibold">연도</p>
+            <div className="flex gap-2 flex-wrap">
+              {years.map(y => (
+                <button key={y} onClick={() => toggle(selectedYears, setSelectedYears, y)}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${selectedYears.includes(y) ? "bg-accent text-white" : "bg-bg3 text-muted hover:text-[var(--text)]"}`}>
+                  {y}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-
-        <div>
-          <p className="text-xs text-muted mb-2 font-semibold">시험 종류</p>
-          <div className="flex gap-2">
-            {REGIONS.map(r => (
-              <button
-                key={r}
-                onClick={() => toggleRegion(r)}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  selectedRegions.includes(r) ? "bg-accent text-white" : "bg-bg3 text-muted hover:text-[var(--text)]"
-                }`}
-              >
-                {r}
-              </button>
-            ))}
+        )}
+        {regions.length > 0 && (
+          <div>
+            <p className="text-xs text-muted mb-2 font-semibold">시험 종류</p>
+            <div className="flex gap-2 flex-wrap">
+              {regions.map(r => (
+                <button key={r} onClick={() => toggle(selectedRegions, setSelectedRegions, r)}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${selectedRegions.includes(r) ? "bg-accent text-white" : "bg-bg3 text-muted hover:text-[var(--text)]"}`}>
+                  {r}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* 결과 */}
       <div className="space-y-3">
-        {filteredAreas.map(areaKey => {
+        {areaKeys.length === 0 && (
+          <p className="text-muted text-sm text-center py-8">회차 매핑 데이터가 없어요.</p>
+        )}
+        {areaKeys.map(areaKey => {
           const results = getResults(areaKey)
           if (!results.length && (selectedYears.length || selectedRegions.length)) return null
           return (
@@ -113,14 +112,12 @@ export default function ExamMapping() {
                 <p className="text-xs text-muted">해당 필터에 결과 없음</p>
               ) : (
                 <div className="space-y-2">
-                  {results.map(({ roundKey, year, region, qnums }) => (
-                    <div key={roundKey} className="flex items-center gap-3 text-xs">
+                  {results.map(({ rk, year, region, qnums }) => (
+                    <div key={rk} className="flex items-center gap-3 text-xs">
                       <span className="text-muted w-24 shrink-0">{year} {region}</span>
                       <div className="flex gap-1.5 flex-wrap">
                         {qnums.map(n => (
-                          <span key={n} className="px-2 py-0.5 bg-accent/20 text-accent rounded font-semibold">
-                            {n}번
-                          </span>
+                          <span key={n} className="px-2 py-0.5 bg-accent/20 text-accent rounded font-semibold">{n}번</span>
                         ))}
                       </div>
                     </div>

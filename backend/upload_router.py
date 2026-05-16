@@ -466,6 +466,9 @@ async def import_json(req: JsonImportRequest):
     exam_info = req.exam.dict()
     source_file = exam_info.get("source_file") or "AI예상문제"
 
+    if is_duplicate(source_file):
+        raise HTTPException(status_code=409, detail=f"이미 존재하는 source_file: {source_file}")
+
     data = {"questions": [q.dict() for q in req.questions]}
 
     try:

@@ -27,102 +27,103 @@ export default function Dashboard() {
     }).catch(() => setMeta({}))
   }, [subject])
 
-  if (!meta) return <div className="text-muted text-sm">로딩 중...</div>
-  if (!meta.title) return <div className="text-muted text-sm">{subject} 학습자료가 없어요.</div>
+  if (!meta) return <div className="lp-empty">로딩 중...</div>
+  if (!meta.title) return <div className="lp-empty">{subject} 학습자료가 없어요.</div>
 
   const checklistPct = progress?.checklist_total
     ? Math.round((progress.checklist_done / progress.checklist_total) * 100)
     : 0
 
   return (
-    <div className="space-y-8">
+    <div className="lp-page">
+
+      {/* 제목 */}
       <div>
-        <h1 className="text-2xl font-bold text-[var(--text)]">{meta.title}</h1>
-        <p className="text-muted text-sm mt-1">{meta.analysis_scope}</p>
+        <h1 className="lp-title">{meta.title}</h1>
+        <p className="lp-subtitle">{meta.analysis_scope}</p>
       </div>
 
-      {paradigm?.title && (
-        <div className="rounded-xl bg-accent/10 border border-accent/30 p-5">
-          <h2 className="font-bold text-accent text-base mb-2">🔁 {paradigm.title}</h2>
-          <p className="text-sm text-[var(--text2)]">{paradigm.description}</p>
-          {(paradigm.disappeared_areas?.length > 0 || paradigm.increased_areas?.length > 0) && (
-            <div className="grid grid-cols-2 gap-4 mt-4">
-              <div>
-                <p className="text-xs text-muted font-semibold mb-2 uppercase tracking-wider">사라진 영역</p>
-                {paradigm.disappeared_areas?.map(a => (
-                  <div key={a.area} className="flex justify-between items-center py-1 border-b border-lborder text-xs">
-                    <span className="text-[var(--text2)]">{a.area}</span>
-                    <span className="text-muted line-through">{a.prev_frequency}</span>
-                  </div>
-                ))}
-              </div>
-              <div>
-                <p className="text-xs text-muted font-semibold mb-2 uppercase tracking-wider">급증한 영역</p>
-                {paradigm.increased_areas?.map(a => (
-                  <div key={a.area} className="flex justify-between items-center py-1 border-b border-lborder text-xs">
-                    <span className="text-[var(--text2)]">{a.area}</span>
-                    <span className="text-accent font-semibold">{a.current_frequency}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
+      {/* 진행 현황 */}
       {progress && (
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-bg2 rounded-xl p-4 border border-lborder">
-            <p className="text-xs text-muted mb-1">열람한 영역</p>
-            <p className="text-2xl font-bold text-accent">{progress.viewed_areas?.length ?? 0}</p>
-          </div>
-          <div className="bg-bg2 rounded-xl p-4 border border-lborder">
-            <p className="text-xs text-muted mb-1">체크리스트</p>
-            <p className="text-2xl font-bold text-success">{checklistPct}%</p>
-            <p className="text-xs text-muted">{progress.checklist_done}/{progress.checklist_total}</p>
-          </div>
-          <div
-            className="bg-bg2 rounded-xl p-4 border border-lborder cursor-pointer hover:border-accent/40 transition-colors"
-            onClick={() => navigate("/learn/checklist")}
-          >
-            <p className="text-xs text-muted mb-1">D-day 준비</p>
-            <p className="text-sm font-semibold text-[var(--text)]">체크리스트 →</p>
+        <div>
+          <p className="lp-section-label">학습 현황</p>
+          <div className="lp-grid-3">
+            <div className="lp-card">
+              <p className="lp-stat-label">열람한 영역</p>
+              <p className="lp-stat-num lp-accent">{progress.viewed_areas?.length ?? 0}</p>
+            </div>
+            <div className="lp-card">
+              <p className="lp-stat-label">체크리스트</p>
+              <p className="lp-stat-num lp-success">{checklistPct}%</p>
+              <p className="lp-text-sm">{progress.checklist_done}/{progress.checklist_total} 완료</p>
+            </div>
+            <button className="lp-row" style={{flexDirection:"column", alignItems:"flex-start"}} onClick={() => navigate("/learn/checklist")}>
+              <p className="lp-stat-label">D-day 준비</p>
+              <p className="lp-text" style={{fontWeight:700, marginTop:6}}>체크리스트 →</p>
+            </button>
           </div>
         </div>
       )}
 
+      {/* 패러다임 변화 */}
+      {paradigm?.title && (
+        <div>
+          <p className="lp-section-label">출제 경향 변화</p>
+          <div className="lp-card-accent">
+            <p style={{fontWeight:700, color:"var(--accent)", marginBottom:8}}>{paradigm.title}</p>
+            <p className="lp-text2" style={{marginBottom:16}}>{paradigm.description}</p>
+            {(paradigm.disappeared_areas?.length > 0 || paradigm.increased_areas?.length > 0) && (
+              <div className="lp-grid-2" style={{gap:20}}>
+                <div>
+                  <p className="lp-section-label" style={{marginBottom:10}}>사라진 영역</p>
+                  {paradigm.disappeared_areas?.map(a => (
+                    <div key={a.area} style={{display:"flex", justifyContent:"space-between", padding:"7px 0", borderBottom:"1px solid var(--border)"}}>
+                      <span className="lp-text2" style={{fontSize:12}}>{a.area}</span>
+                      <span className="lp-muted" style={{fontSize:11, textDecoration:"line-through"}}>{a.prev_frequency}</span>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <p className="lp-section-label" style={{marginBottom:10}}>급증한 영역</p>
+                  {paradigm.increased_areas?.map(a => (
+                    <div key={a.area} style={{display:"flex", justifyContent:"space-between", padding:"7px 0", borderBottom:"1px solid var(--border)"}}>
+                      <span className="lp-text2" style={{fontSize:12}}>{a.area}</span>
+                      <span className="lp-accent" style={{fontSize:11, fontWeight:700}}>{a.current_frequency}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 빈출 TOP 영역 */}
       {topAreas.length > 0 && (
         <div>
-          <h2 className="text-base font-bold mb-4 text-[var(--text)]">빈출 TOP {topAreas.length} 영역</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <p className="lp-section-label">빈출 TOP {topAreas.length} 영역</p>
+          <div className="lp-grid-2">
             {topAreas.map(area => (
               <button
                 key={area.rank}
                 onClick={() => area.area_key && navigate(`/learn/areas/${area.area_key}`)}
                 disabled={!area.area_key}
-                className="text-left bg-bg2 border border-lborder rounded-xl p-4 hover:border-accent/50 transition-all disabled:opacity-50 disabled:cursor-default"
+                className="lp-row"
+                style={{flexDirection:"column", alignItems:"flex-start", opacity: area.area_key ? 1 : 0.5, cursor: area.area_key ? "pointer" : "default"}}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-bold text-muted">#{area.rank}</span>
-                      <span className="text-xs text-muted">{area.difficulty && `난이도 ${area.difficulty}`}</span>
-                    </div>
-                    <p className="font-semibold text-sm text-[var(--text)]">{area.name}</p>
-                    {area.frequency_per_round && (
-                      <p className="text-xs text-muted mt-1">회차당 {area.frequency_per_round}</p>
-                    )}
-                  </div>
+                <div style={{display:"flex", justifyContent:"space-between", width:"100%", marginBottom:6}}>
+                  <span style={{fontSize:11, fontWeight:700, color:"var(--text2)"}}>#{area.rank}</span>
                   {area.study_weight != null && (
-                    <div className="text-right shrink-0">
-                      <div className="text-lg font-black text-accent">{area.study_weight}%</div>
-                      <div className="text-xs text-muted">학습 비중</div>
-                    </div>
+                    <span className="lp-accent" style={{fontSize:18, fontWeight:900, lineHeight:1}}>{area.study_weight}%</span>
                   )}
                 </div>
+                <p style={{fontWeight:700, fontSize:14, color:"var(--text)", marginBottom:4}}>{area.name}</p>
+                {area.frequency_per_round && (
+                  <p className="lp-muted" style={{fontSize:12}}>회차당 {area.frequency_per_round}</p>
+                )}
                 {area.study_weight != null && (
-                  <div className="mt-3 h-1 bg-bg3 rounded-full overflow-hidden">
-                    <div className="h-full bg-accent rounded-full" style={{ width: `${Math.min(area.study_weight * 4, 100)}%` }} />
+                  <div className="lp-progress-track" style={{width:"100%", marginTop:10}}>
+                    <div className="lp-progress-fill" style={{width:`${Math.min(area.study_weight * 4, 100)}%`}} />
                   </div>
                 )}
               </button>
@@ -131,9 +132,10 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* 모토 */}
       {motto && (
-        <div className="rounded-xl border border-accent/30 bg-accent/5 p-5 text-center">
-          <p className="text-sm font-bold text-accent">"{motto}"</p>
+        <div className="lp-card-accent" style={{textAlign:"center"}}>
+          <p style={{fontSize:14, fontWeight:700, color:"var(--accent)"}}>"{motto}"</p>
         </div>
       )}
     </div>

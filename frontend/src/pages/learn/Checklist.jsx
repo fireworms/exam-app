@@ -4,14 +4,25 @@ import API from "../../api"
 
 function CheckItem({ id, text, checked, onToggle }) {
   return (
-    <label className="flex items-start gap-3 cursor-pointer group py-2 border-b border-lborder last:border-0">
+    <label style={{
+      display:"flex", alignItems:"flex-start", gap:12,
+      cursor:"pointer",
+      padding:"11px 0",
+      borderBottom:"1px solid var(--border)",
+    }}>
       <input
         type="checkbox"
         checked={checked}
         onChange={() => onToggle(id, !checked)}
-        className="mt-0.5 accent-[#7c6af7] w-4 h-4 shrink-0 cursor-pointer"
+        style={{marginTop:2, width:16, height:16, flexShrink:0, cursor:"pointer", accentColor:"var(--accent)"}}
       />
-      <span className={`text-sm transition-all ${checked ? "line-through text-muted" : "text-[var(--text2)] group-hover:text-[var(--text)]"}`}>
+      <span style={{
+        fontSize:13, lineHeight:1.6,
+        color: checked ? "var(--text2)" : "var(--text)",
+        textDecoration: checked ? "line-through" : "none",
+        opacity: checked ? 0.6 : 1,
+        transition: "all 0.15s",
+      }}>
         {text}
       </span>
     </label>
@@ -45,60 +56,76 @@ export default function Checklist() {
     setProgress({})
   }
 
-  if (!checklist) return <div className="text-muted text-sm">로딩 중...</div>
+  if (!checklist) return <div className="lp-empty">로딩 중...</div>
 
-  const groups = [
-    { id: "one_week", title: "📅 시험 1주 전", items: checklist.one_week_before || [] },
-    { id: "must", title: "🔴 전날 — 절대 잊지 말 것", items: checklist.day_before?.must_remember || [], danger: true },
-    { id: "strategy", title: "⚡ 시험 당일 전략", items: checklist.day_before?.exam_strategy || [], accent: true },
-  ]
+  const dynamicGroups = []
 
-  const allItems = groups.flatMap(g => g.items.map((_, i) => `${g.id}_${i}`))
+  if (checklist.독해 || checklist.문법 || checklist.어휘) {
+    Object.entries(checklist).forEach(([k, v]) => {
+      if (Array.isArray(v)) {
+        dynamicGroups.push({ id: k, title: k, items: v })
+      }
+    })
+  } else {
+    const fixedGroups = [
+      { id: "one_week", title: "시험 1주 전", items: checklist.one_week_before || [] },
+      { id: "must", title: "전날 — 절대 잊지 말 것", items: checklist.day_before?.must_remember || [], danger: true },
+      { id: "strategy", title: "시험 당일 전략", items: checklist.day_before?.exam_strategy || [], accent: true },
+    ]
+    fixedGroups.forEach(g => dynamicGroups.push(g))
+  }
+
+  const allItems = dynamicGroups.flatMap(g => g.items.map((_, i) => `${g.id}_${i}`))
   const total = allItems.length
   const done = allItems.filter(id => progress[id]).length
   const pct = total ? Math.round((done / total) * 100) : 0
 
-  if (!total) return <div className="text-muted text-sm text-center py-8">체크리스트 데이터가 없어요.</div>
+  if (!total) return <div className="lp-empty">체크리스트 데이터가 없어요.</div>
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="lp-page">
+
+      {/* 헤더 */}
+      <div style={{display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:16}}>
         <div>
-          <h1 className="text-2xl font-bold text-[var(--text)]">시험 직전 체크리스트</h1>
-          <p className="text-muted text-sm mt-1">{subject} · 체크하면 자동 저장</p>
+          <h1 className="lp-title">시험 직전 체크리스트</h1>
+          <p className="lp-subtitle">{subject} · 체크하면 자동 저장</p>
         </div>
-        <button
-          onClick={reset}
-          className="text-xs text-muted border border-lborder rounded-lg px-3 py-1.5 hover:border-danger/50 hover:text-danger transition-all"
-        >
+        <button className="lp-btn lp-btn-danger" onClick={reset} style={{flexShrink:0}}>
           초기화
         </button>
       </div>
 
-      <div>
-        <div className="flex justify-between text-xs text-muted mb-2">
-          <span>전체 진행률</span>
-          <span>{done}/{total} ({pct}%)</span>
+      {/* 진행률 */}
+      <div className="lp-card">
+        <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
+          <span style={{fontSize:13, fontWeight:600, color:"var(--text)"}}>전체 진행률</span>
+          <span className="lp-muted" style={{fontSize:12}}>{done}/{total} ({pct}%)</span>
         </div>
-        <div className="h-2 bg-bg3 rounded-full overflow-hidden">
-          <div className="h-full bg-accent rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
+        <div className="lp-progress-track">
+          <div className="lp-progress-fill" style={{width:`${pct}%`}} />
         </div>
       </div>
 
-      {groups.map(g => g.items.length > 0 && (
-        <div key={g.id} className="bg-bg2 border border-lborder rounded-xl p-5">
-          <h2 className={`text-sm font-bold mb-3 ${g.danger ? "text-danger" : g.accent ? "text-accent" : "text-[var(--text)]"}`}>
+      {/* 그룹별 체크리스트 */}
+      {dynamicGroups.map(g => g.items.length > 0 && (
+        <div key={g.id}>
+          <p className="lp-section-label" style={{
+            color: g.danger ? "var(--wrong)" : g.accent ? "var(--accent)" : undefined
+          }}>
             {g.title}
-          </h2>
-          {g.items.map((text, i) => (
-            <CheckItem
-              key={i}
-              id={`${g.id}_${i}`}
-              text={text}
-              checked={!!progress[`${g.id}_${i}`]}
-              onToggle={toggle}
-            />
-          ))}
+          </p>
+          <div className="lp-card">
+            {g.items.map((text, i) => (
+              <CheckItem
+                key={i}
+                id={`${g.id}_${i}`}
+                text={text}
+                checked={!!progress[`${g.id}_${i}`]}
+                onToggle={toggle}
+              />
+            ))}
+          </div>
         </div>
       ))}
     </div>

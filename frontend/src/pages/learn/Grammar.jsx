@@ -4,54 +4,56 @@ import API from "../../api"
 
 function ValueDisplay({ val }) {
   if (!val) return null
-  if (typeof val === "string") return <p className="text-sm text-[var(--text2)]">{val}</p>
+  if (typeof val === "string") return <p style={{fontSize:13, color:"var(--text2)", lineHeight:1.7}}>{val}</p>
   if (Array.isArray(val)) return (
-    <ul className="space-y-1.5 mt-1">
+    <div style={{display:"flex", flexDirection:"column", gap:8, marginTop:4}}>
       {val.map((item, i) => (
-        <li key={i} className="pl-3 border-l-2 border-accent/30 text-sm text-[var(--text2)]">
-          {typeof item === "string" ? item : (
+        <div key={i} style={{paddingLeft:12, borderLeft:"2px solid rgba(124,106,247,0.3)"}}>
+          {typeof item === "string" ? (
+            <p style={{fontSize:13, color:"var(--text2)", lineHeight:1.6}}>{item}</p>
+          ) : (
             <div>
               {(item.type || item.morpheme || item.position) && (
-                <span className="font-semibold text-accent2 mr-2">
+                <span style={{fontSize:13, fontWeight:700, color:"var(--accent2)", marginRight:8}}>
                   {item.type || item.morpheme || item.position}
                 </span>
               )}
               {(item.definition || item.basic || item.description || item.rule) && (
-                <span className="text-muted mr-2">
+                <span style={{fontSize:12, color:"var(--text2)"}}>
                   {item.definition || item.basic || item.description || item.rule}
                 </span>
               )}
-              {item.markers && (
-                <span className="text-xs">
+              {item.markers?.length > 0 && (
+                <div style={{display:"flex", flexWrap:"wrap", gap:4, marginTop:4}}>
                   {item.markers.map(m => (
-                    <span key={m} className="inline-block bg-bg3 px-1.5 py-0.5 rounded mr-1 text-accent">{m}</span>
+                    <span key={m} style={{fontSize:11, padding:"2px 8px", background:"var(--bg3)", border:"1px solid var(--border)", borderRadius:20, color:"var(--accent)"}}>{m}</span>
                   ))}
-                </span>
+                </div>
               )}
-              {item.examples && (
-                <ul className="mt-1 space-y-0.5">
+              {item.examples?.length > 0 && (
+                <div style={{marginTop:6}}>
                   {item.examples.map((ex, j) => (
-                    <li key={j} className="text-xs text-muted pl-2 border-l border-accent/20">{ex}</li>
+                    <p key={j} style={{fontSize:12, color:"var(--text2)", paddingLeft:8, borderLeft:"1px solid var(--border)", marginTop:2}}>{ex}</p>
                   ))}
-                </ul>
+                </div>
               )}
             </div>
           )}
-        </li>
+        </div>
       ))}
-    </ul>
+    </div>
   )
   if (typeof val === "object") return (
-    <div className="space-y-2 mt-1">
+    <div style={{display:"flex", flexDirection:"column", gap:12, marginTop:4}}>
       {Object.entries(val).map(([k, v]) => (
         <div key={k}>
-          <p className="text-xs text-muted font-semibold mb-0.5">{k.replace(/_/g, " ")}</p>
+          <p style={{fontSize:11, fontWeight:700, color:"var(--text2)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6}}>{k.replace(/_/g, " ")}</p>
           <ValueDisplay val={v} />
         </div>
       ))}
     </div>
   )
-  return <p className="text-sm text-[var(--text2)]">{String(val)}</p>
+  return <p style={{fontSize:13, color:"var(--text2)"}}>{String(val)}</p>
 }
 
 export default function Grammar() {
@@ -70,49 +72,52 @@ export default function Grammar() {
       })
   }, [subject])
 
-  if (!grammar) return <div className="text-muted text-sm">로딩 중...</div>
+  if (!grammar) return <div className="lp-empty">로딩 중...</div>
 
   const keys = Object.keys(grammar)
-  if (!keys.length) return <div className="text-muted text-sm py-8 text-center">문법 데이터가 없어요.</div>
+  if (!keys.length) return <div className="lp-empty">문법 데이터가 없어요.</div>
 
   const section = active ? grammar[active] : null
 
   return (
-    <div className="space-y-6">
+    <div className="lp-page">
       <div>
-        <h1 className="text-2xl font-bold text-[var(--text)]">문법 기초</h1>
-        <p className="text-muted text-sm mt-1">{subject} · 자주 나오는 문법 개념 정리</p>
+        <h1 className="lp-title">문법 기초</h1>
+        <p className="lp-subtitle">{subject} · 자주 나오는 문법 개념 정리</p>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
-        {keys.map(key => (
-          <button
-            key={key}
-            onClick={() => setActive(key)}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-              active === key
-                ? "bg-accent text-white"
-                : "bg-bg2 border border-lborder text-muted hover:text-[var(--text)]"
-            }`}
-          >
-            {grammar[key]?.name || key.replace(/_/g, " ")}
-          </button>
-        ))}
+      {/* 탭 */}
+      <div>
+        <p className="lp-section-label">카테고리 선택</p>
+        <div className="lp-tabs">
+          {keys.map(key => (
+            <button
+              key={key}
+              className={`lp-tab-btn${active === key ? " active" : ""}`}
+              onClick={() => setActive(key)}
+            >
+              {grammar[key]?.name || key.replace(/_/g, " ")}
+            </button>
+          ))}
+        </div>
       </div>
 
+      {/* 내용 */}
       {section && (
-        <div className="bg-bg2 border border-lborder rounded-xl p-5 space-y-4">
-          {section.name && <h2 className="text-base font-bold text-[var(--text)]">{section.name}</h2>}
-          {Object.entries(section)
-            .filter(([k]) => k !== "name")
-            .map(([k, v]) => (
-              <div key={k} className="border-t border-lborder pt-4 first:border-0 first:pt-0">
-                <p className="text-xs text-muted font-semibold uppercase tracking-wider mb-2">
-                  {k.replace(/_/g, " ")}
-                </p>
-                <ValueDisplay val={v} />
-              </div>
-            ))}
+        <div>
+          {section.name && <p className="lp-section-label">{section.name}</p>}
+          <div style={{display:"flex", flexDirection:"column", gap:16}}>
+            {Object.entries(section)
+              .filter(([k]) => k !== "name")
+              .map(([k, v]) => (
+                <div key={k} className="lp-card">
+                  <p style={{fontSize:11, fontWeight:700, color:"var(--text2)", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:12, paddingBottom:8, borderBottom:"1px solid var(--border)"}}>
+                    {k.replace(/_/g, " ")}
+                  </p>
+                  <ValueDisplay val={v} />
+                </div>
+              ))}
+          </div>
         </div>
       )}
     </div>

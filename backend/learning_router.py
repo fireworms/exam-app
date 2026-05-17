@@ -20,7 +20,7 @@ def _load_notes():
     for file in DATA_DIR.glob("*.json"):
         try:
             data = json.loads(file.read_text(encoding="utf-8"))
-            subject = data.get("meta", {}).get("subject", file.stem)
+            subject = (data.get("meta") or data.get("exam_info") or {}).get("subject", file.stem)
             _notes_cache[subject] = data
         except Exception as e:
             print(f"[learn] JSON 로드 실패: {file} — {e}")
@@ -171,7 +171,7 @@ def get_traps(subject: str = "국어"):
 @router.get("/grammar")
 def get_grammar(subject: str = "국어"):
     notes = _get_notes(subject)
-    return notes.get("korean_grammar_basics", {})
+    return notes.get("grammar_basics") or notes.get("korean_grammar_basics", {})
 
 
 @router.get("/paradigm-shift")
@@ -244,7 +244,60 @@ def get_motto(subject: str = "국어"):
 
 @router.get("/subjects")
 def get_subjects():
-    return [{"subject": k, "title": v.get("meta", {}).get("title", k)} for k, v in _notes_cache.items()]
+    result = []
+    for k, v in _notes_cache.items():
+        meta = v.get("meta") or v.get("exam_info") or {}
+        subject_type = "english" if "vocabulary_essentials" in v else "korean"
+        result.append({
+            "subject": k,
+            "title": meta.get("title") or meta.get("target_exam") or k,
+            "type": subject_type,
+        })
+    return result
+
+
+# ── 영어 전용 엔드포인트 ─────────────────────────────────────────────────
+
+@router.get("/vocabulary")
+def get_vocabulary(subject: str = "영어"):
+    notes = _get_notes(subject)
+    return notes.get("vocabulary_essentials", {})
+
+
+@router.get("/grammar-patterns")
+def get_grammar_patterns(subject: str = "영어"):
+    notes = _get_notes(subject)
+    return notes.get("grammar_patterns", [])
+
+
+@router.get("/idioms")
+def get_idioms(subject: str = "영어"):
+    notes = _get_notes(subject)
+    return notes.get("idioms_and_phrases", {})
+
+
+@router.get("/business-english")
+def get_business_english(subject: str = "영어"):
+    notes = _get_notes(subject)
+    return notes.get("business_english", {})
+
+
+@router.get("/time-strategy")
+def get_time_strategy(subject: str = "영어"):
+    notes = _get_notes(subject)
+    return notes.get("time_allocation_strategy", {})
+
+
+@router.get("/mindset")
+def get_mindset(subject: str = "영어"):
+    notes = _get_notes(subject)
+    return notes.get("winning_mindset", [])
+
+
+@router.get("/paradigm")
+def get_paradigm(subject: str = "영어"):
+    notes = _get_notes(subject)
+    return notes.get("paradigm_shift_2025") or notes.get("paradigm_shift", {})
 
 
 # ── 사용자 상태 API ───────────────────────────────────────────────────────

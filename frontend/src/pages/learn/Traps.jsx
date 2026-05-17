@@ -2,10 +2,9 @@ import { useEffect, useState } from "react"
 import { useSubject } from "./SubjectContext"
 import API from "../../api"
 
-const FREQ_STYLE = {
-  "매우 높음": "bg-danger/20 text-danger border-danger/30",
-  "높음": "bg-warn/20 text-warn border-warn/30",
-  "중간": "bg-muted/10 text-muted border-lborder",
+const FREQ_CLASS = {
+  "매우 높음": "lp-badge-danger",
+  "높음": "lp-badge-warn",
 }
 
 export default function Traps() {
@@ -25,54 +24,55 @@ export default function Traps() {
   )
 
   return (
-    <div className="space-y-6">
+    <div className="lp-page">
       <div>
-        <h1 className="text-2xl font-bold text-[var(--text)]">함정 모음</h1>
-        <p className="text-muted text-sm mt-1">{subject} · 출제자가 자주 쓰는 함정 패턴</p>
+        <h1 className="lp-title">함정 모음</h1>
+        <p className="lp-subtitle">{subject} · 클릭하면 대처법을 볼 수 있어요</p>
       </div>
 
       <input
-        className="w-full bg-bg2 border border-lborder rounded-xl px-4 py-2.5 text-sm text-[var(--text)] outline-none focus:border-accent/50 placeholder:text-muted"
+        className="lp-input"
         placeholder="함정 키워드 검색..."
         value={query}
         onChange={e => setQuery(e.target.value)}
       />
 
-      {filtered.length === 0 && (
-        <p className="text-muted text-sm text-center py-8">함정 데이터가 없어요.</p>
-      )}
+      {filtered.length === 0 && <div className="lp-empty">함정 데이터가 없어요.</div>}
 
-      <div className="space-y-2">
-        {filtered.map((trap, i) => (
-          <button
-            key={trap.rank ?? i}
-            onClick={() => setExpanded(expanded === i ? null : i)}
-            className="w-full text-left bg-bg2 border border-lborder rounded-xl p-4 hover:border-accent/30 transition-all"
-          >
-            <div className="flex items-start gap-3">
-              <span className="text-lg font-black text-accent/40 shrink-0 w-8 text-center">
-                {String((trap.rank ?? i + 1)).padStart(2, "0")}
-              </span>
-              <div className="flex-1 min-w-0">
-                {trap.frequency && (
-                  <div className="mb-1">
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${FREQ_STYLE[trap.frequency] || FREQ_STYLE["중간"]}`}>
+      <div>
+        {filtered.length > 0 && <p className="lp-section-label">{filtered.length}개 함정 패턴</p>}
+        <div className="lp-list">
+          {filtered.map((trap, i) => (
+            <button
+              key={trap.rank ?? i}
+              className="lp-row"
+              style={{flexDirection:"column", alignItems:"flex-start"}}
+              onClick={() => setExpanded(expanded === i ? null : i)}
+            >
+              <div style={{display:"flex", alignItems:"center", gap:12, width:"100%"}}>
+                <span style={{fontSize:14, fontWeight:900, color:"var(--accent)", opacity:0.45, width:30, textAlign:"center", flexShrink:0}}>
+                  {String((trap.rank ?? i + 1)).padStart(2, "0")}
+                </span>
+                <div style={{flex:1, minWidth:0}}>
+                  {trap.frequency && (
+                    <span className={`lp-badge ${FREQ_CLASS[trap.frequency] || "lp-badge-muted"}`} style={{marginBottom:6, display:"inline-block"}}>
                       {trap.frequency}
                     </span>
-                  </div>
-                )}
-                <p className="text-sm font-semibold text-[var(--text)]">{trap.trap}</p>
-                {expanded === i && trap.countermeasure && (
-                  <div className="mt-3 pt-3 border-t border-lborder">
-                    <p className="text-xs text-muted font-semibold mb-1">대처법</p>
-                    <p className="text-sm text-success">{trap.countermeasure}</p>
-                  </div>
-                )}
+                  )}
+                  <p style={{fontWeight:700, fontSize:14, color:"var(--text)", textAlign:"left"}}>{trap.trap}</p>
+                </div>
+                <span className="lp-muted" style={{fontSize:11, flexShrink:0}}>{expanded === i ? "▲" : "▼"}</span>
               </div>
-              <span className="text-muted text-xs shrink-0">{expanded === i ? "▲" : "▼"}</span>
-            </div>
-          </button>
-        ))}
+
+              {expanded === i && trap.countermeasure && (
+                <div style={{width:"100%", marginTop:12, paddingTop:12, borderTop:"1px solid var(--border)", paddingLeft:42}}>
+                  <p style={{fontSize:11, fontWeight:700, color:"var(--text2)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6}}>대처법</p>
+                  <p style={{fontSize:13, color:"var(--correct)", lineHeight:1.7}}>{trap.countermeasure}</p>
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )

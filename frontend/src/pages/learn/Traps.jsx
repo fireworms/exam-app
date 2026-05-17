@@ -51,7 +51,7 @@ export default function Traps() {
             >
               <div style={{display:"flex", alignItems:"center", gap:12, width:"100%"}}>
                 <span style={{fontSize:14, fontWeight:900, color:"var(--accent)", opacity:0.45, width:30, textAlign:"center", flexShrink:0}}>
-                  {String((trap.rank ?? i + 1)).padStart(2, "0")}
+                  {String((trap.rank ?? trap.id ?? i + 1)).padStart(2, "0")}
                 </span>
                 <div style={{flex:1, minWidth:0}}>
                   {trap.frequency && (
@@ -64,10 +64,10 @@ export default function Traps() {
                 <span className="lp-muted" style={{fontSize:11, flexShrink:0}}>{expanded === i ? "▲" : "▼"}</span>
               </div>
 
-              {expanded === i && trap.countermeasure && (
+              {expanded === i && (trap.countermeasure || trap.avoidance) && (
                 <div style={{width:"100%", marginTop:12, paddingTop:12, borderTop:"1px solid var(--border)", paddingLeft:42}}>
                   <p style={{fontSize:11, fontWeight:700, color:"var(--text2)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6}}>대처법</p>
-                  <p style={{fontSize:13, color:"var(--correct)", lineHeight:1.7}}>{trap.countermeasure}</p>
+                  <p style={{fontSize:13, color:"var(--correct)", lineHeight:1.7}}>{trap.countermeasure || trap.avoidance}</p>
                 </div>
               )}
             </button>

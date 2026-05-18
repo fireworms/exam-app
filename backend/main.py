@@ -476,10 +476,37 @@ def update_settings(req: SettingsRequest):
 def get_exams():
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT * FROM exams ORDER BY year DESC, month DESC, day DESC")
+    c.execute("""
+        SELECT e.*, COUNT(q.id) AS question_count
+        FROM exams e
+        LEFT JOIN questions q ON q.exam_id = e.id
+        GROUP BY e.id
+        ORDER BY e.year DESC, e.month DESC, e.day DESC
+    """)
     exams = [dict(row) for row in c.fetchall()]
     conn.close()
     return exams
+
+
+@app.delete("/exams/{exam_id}", dependencies=[Depends(verify)])
+def delete_exam(exam_id: int):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT id FROM exams WHERE id = ?", (exam_id,))
+    if not c.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Exam not found")
+    c.execute("DELETE FROM solve_history WHERE question_id IN (SELECT id FROM questions WHERE exam_id = ?)", (exam_id,))
+    c.execute("DELETE FROM wrong_notes WHERE question_id IN (SELECT id FROM questions WHERE exam_id = ?)", (exam_id,))
+    c.execute("DELETE FROM scraps WHERE question_id IN (SELECT id FROM questions WHERE exam_id = ?)", (exam_id,))
+    c.execute("DELETE FROM choices WHERE question_id IN (SELECT id FROM questions WHERE exam_id = ?)", (exam_id,))
+    c.execute("DELETE FROM questions WHERE exam_id = ?", (exam_id,))
+    c.execute("DELETE FROM sessions WHERE exam_id = ?", (exam_id,))
+    c.execute("DELETE FROM upload_logs WHERE exam_id = ?", (exam_id,))
+    c.execute("DELETE FROM exams WHERE id = ?", (exam_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 

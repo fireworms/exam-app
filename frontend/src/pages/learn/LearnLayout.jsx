@@ -6,17 +6,37 @@ import API from "../../api"
 import "./learn.css"
 
 export default function LearnLayout() {
-  const [subject, setSubject] = useState("국어")
+  const [subject, setSubject] = useState(() => localStorage.getItem("learn_subject") || "국어")
   const [subjects, setSubjects] = useState([])
 
   useEffect(() => {
     fetch(`${API}/api/learn/subjects`)
       .then(r => r.json())
-      .then(setSubjects)
+      .then(list => {
+        setSubjects(list)
+        const stored = localStorage.getItem("learn_subject")
+        const match = list.find(s => s.subject === stored)
+        if (match) {
+          localStorage.setItem("learn_type", match.type)
+        } else if (list.length > 0) {
+          setSubject(list[0].subject)
+          localStorage.setItem("learn_subject", list[0].subject)
+          localStorage.setItem("learn_type", list[0].type)
+        }
+      })
       .catch(() => {})
   }, [])
 
-  const currentType = subjects.find(s => s.subject === subject)?.type || "korean"
+  const handleSubjectChange = (value) => {
+    const type = subjects.find(s => s.subject === value)?.type || "korean"
+    setSubject(value)
+    localStorage.setItem("learn_subject", value)
+    localStorage.setItem("learn_type", type)
+  }
+
+  const currentType = subjects.length > 0
+    ? (subjects.find(s => s.subject === subject)?.type || "korean")
+    : (localStorage.getItem("learn_type") || "korean")
   const sections = currentType === "english" ? LEARN_SECTIONS_EN : LEARN_SECTIONS
 
   return (
@@ -45,7 +65,7 @@ export default function LearnLayout() {
               <p className="lr-subject-label">과목</p>
               <select
                 value={subject}
-                onChange={e => setSubject(e.target.value)}
+                onChange={e => handleSubjectChange(e.target.value)}
                 className="lr-select"
               >
                 {subjects.length === 0
@@ -77,7 +97,7 @@ export default function LearnLayout() {
             <div className="lr-mobile-subject-row">
               <select
                 value={subject}
-                onChange={e => setSubject(e.target.value)}
+                onChange={e => handleSubjectChange(e.target.value)}
                 className="lr-select-sm"
               >
                 {subjects.length === 0

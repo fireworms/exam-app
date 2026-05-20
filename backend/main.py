@@ -23,7 +23,6 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 from upload_router import router as upload_router
 from edit_router import router as edit_router
-from learning_router import router as learning_router
 os.makedirs(os.path.join(BASE_DIR, "images"), exist_ok=True)
 
 
@@ -56,7 +55,6 @@ def verify(request: Request, credentials: HTTPBasicCredentials = Depends(HTTPBas
 
 app.include_router(upload_router)
 app.include_router(edit_router)
-app.include_router(learning_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -263,6 +261,29 @@ def get_questions_by_ids(ids: str):
             questions.append(q)
     conn.close()
     return questions
+
+
+@app.get("/questions/deeplink", dependencies=[Depends(verify)])
+def get_question_by_deeplink(year: int, exam_type: str, question_no: int, subject: str):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("""
+        SELECT q.*, e.year, e.month, e.day, e.subject, e.grade
+        FROM questions q
+        JOIN exams e ON q.exam_id = e.id
+        WHERE e.year = ? AND e.region = ? AND e.subject = ? AND q.number = ?
+        ORDER BY e.month ASC, e.day ASC
+        LIMIT 1
+    """, (year, exam_type, subject, question_no))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Question not found")
+    q = dict(row)
+    c.execute("SELECT * FROM choices WHERE question_id = ? ORDER BY number", (q["id"],))
+    q["choices"] = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return q
 
 
 @app.get("/questions/{question_id}", dependencies=[Depends(verify)])

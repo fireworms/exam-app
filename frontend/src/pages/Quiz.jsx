@@ -10,6 +10,9 @@ export default function Quiz() {
   const mode = searchParams.get('mode') || 'all'
   const examId = searchParams.get('exam_id')
   const subject = searchParams.get('subject')
+  const deeplinkYear = searchParams.get('year')
+  const deeplinkExamType = searchParams.get('examType')
+  const deeplinkQuestionNo = searchParams.get('questionNo')
   const examIds = searchParams.get('exam_ids')
   const examSubjectsParam = searchParams.get('subjects')
   const examQuestionModeParam = searchParams.get('question_mode') || 'random'
@@ -144,10 +147,15 @@ export default function Quiz() {
         return
       }
 
-      // 건너뛴 문제 이어풀기
+      // 딥링크: 학습자료 앱에서 특정 문제로 직접 이동
       const skippedMode = searchParams.get('skipped_ids')
       let res
-      if (skippedMode) {
+      if (deeplinkYear && deeplinkExamType && deeplinkQuestionNo && subject) {
+        const q = await axios.get(`${API}/questions/deeplink`, {
+          params: { year: deeplinkYear, exam_type: deeplinkExamType, question_no: deeplinkQuestionNo, subject }
+        })
+        res = { data: [q.data] }
+      } else if (skippedMode) {
         res = await axios.get(`${API}/questions/by_ids`, { params: { ids: skippedMode } })
       } else if (examSubjectsParam) {
         res = await axios.get(`${API}/questions/exam-mode`, {

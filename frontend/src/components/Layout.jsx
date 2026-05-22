@@ -1,16 +1,22 @@
-import { Outlet, NavLink } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { clearToken } from '../api'
 
 const links = [
   { to: '/', label: '홈', icon: '⌂', end: true },
   { to: '/quiz', label: '문제풀기', icon: '✎' },
   { to: '/wrong-notes', label: '오답노트', icon: '✗' },
   { to: '/scraps', label: '스크랩', icon: '★' },
-  { to: '/learn', label: '학습자료', icon: '📖' },
-  { to: '/stats', label: '통계', icon: '📊' },
+{ to: '/stats', label: '통계', icon: '📊' },
   { to: '/settings', label: '설정', icon: '⚙' },
 ]
 
 export default function Layout() {
+  const navigate = useNavigate()
+  function logout() {
+    clearToken()
+    navigate('/login')
+  }
+
   return (
     <div className="layout">
       {/* 데스크탑 사이드바 */}
@@ -33,6 +39,7 @@ export default function Layout() {
             </li>
           ))}
         </ul>
+        <button onClick={logout} style={{marginTop:'auto',padding:'8px 12px',borderRadius:8,border:'1px solid var(--border)',background:'transparent',color:'var(--text2)',cursor:'pointer',fontSize:13}}>로그아웃</button>
       </nav>
 
       {/* 모바일 상단 헤더 */}

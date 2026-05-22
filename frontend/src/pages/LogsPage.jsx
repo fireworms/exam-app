@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import API from "../api";
+import API, { authFetch } from '../api';
 
 const STATUS_MAP = {
   pending:    { label: "대기 중",   color: "#f59e0b", bg: "#fffbeb" },
@@ -14,7 +14,7 @@ function UploadLogs() {
 
   const fetchLogs = async () => {
     try {
-      const res = await fetch(`${API}/upload/logs`);
+      const res = await authFetch(`${API}/upload/logs`);
       const data = await res.json();
       setLogs(data.logs);
     } catch (e) {
@@ -101,7 +101,7 @@ function ExamManager() {
 
   const fetchExams = async () => {
     try {
-      const res = await fetch(`${API}/exams`);
+      const res = await authFetch(`${API}/exams`);
       const data = await res.json();
       setExams(data);
     } catch (e) {
@@ -116,7 +116,7 @@ function ExamManager() {
   const handleDelete = async (examId) => {
     setDeleting(true);
     try {
-      const res = await fetch(`${API}/exams/${examId}`, { method: "DELETE" });
+      const res = await authFetch(`${API}/exams/${examId}`, { method: "DELETE" });
       if (res.ok) {
         setExams(prev => prev.filter(e => e.id !== examId));
         setConfirmId(null);

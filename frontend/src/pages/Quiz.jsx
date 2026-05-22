@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import axios from '../axios'
 import API from '../api'
 
 export default function Quiz() {

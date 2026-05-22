@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import API from "../api";
+import API, { authFetch } from '../api';
 
 const JSON_FORMAT_TEMPLATE = `{
   "exam": {
@@ -99,7 +99,7 @@ export default function UploadPage() {
         prev.map((i) => (i.name === item.name ? { ...i, status: "uploading" } : i))
       );
       try {
-        const res = await fetch(`${API}/upload/json`, {
+        const res = await authFetch(`${API}/upload/json`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(item.parsed),
@@ -137,7 +137,7 @@ export default function UploadPage() {
     for (const f of selectedFiles) formData.append("files", f);
 
     try {
-      const res = await fetch(`${API}/upload/analyze`, {
+      const res = await authFetch(`${API}/upload/analyze`, {
         method: "POST",
         body: formData,
       });
@@ -172,7 +172,7 @@ export default function UploadPage() {
     }
     setConfirming(true);
     try {
-      const res = await fetch(`${API}/upload/confirm`, {
+      const res = await authFetch(`${API}/upload/confirm`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

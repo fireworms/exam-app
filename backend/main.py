@@ -1,14 +1,10 @@
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi import Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
-import sqlite3
 import random
-import secrets
 import os
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
@@ -16,301 +12,292 @@ from dotenv import load_dotenv
 KST = timezone(timedelta(hours=9))
 
 def now_kst() -> str:
-    return datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.now(KST).isoformat()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
+from db import get_supabase
+from auth import get_current_user
 from upload_router import router as upload_router
 from edit_router import router as edit_router
+
 os.makedirs(os.path.join(BASE_DIR, "images"), exist_ok=True)
 
-
 app = FastAPI()
-
-# ─── Basic Auth ───────────────────────────────────────────────────────────
-
-security = HTTPBasic()
-
-AUTH_USER = os.getenv("AUTH_USER", "admin")
-AUTH_PASS = os.getenv("AUTH_PASS", "changeme")
-AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() == "true"
-
-def verify(request: Request, credentials: HTTPBasicCredentials = Depends(HTTPBasic(auto_error=False))):
-    if not AUTH_ENABLED:
-        return "dev"
-    if not credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    ok_user = secrets.compare_digest(credentials.username.encode(), AUTH_USER.encode())
-    ok_pass = secrets.compare_digest(credentials.password.encode(), AUTH_PASS.encode())
-    if not (ok_user and ok_pass):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials.username
 
 app.include_router(upload_router)
 app.include_router(edit_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:8008"],
+    allow_origins=["http://localhost:5173", "http://localhost:8008", "http://192.168.50.102:8008"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-DB_PATH = os.path.join(BASE_DIR, "exam_g.db")
+
+# ─── 인증 ────────────────────────────────────────────
+
+class AuthRequest(BaseModel):
+    email: str
+    password: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class UpdatePasswordRequest(BaseModel):
+    password: str
 
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def validate_password(password: str):
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="비밀번호는 8자 이상이어야 해요")
+    if not any(c.isalpha() for c in password):
+        raise HTTPException(status_code=400, detail="비밀번호에 영문자가 포함되어야 해요")
+    if not any(c.isdigit() for c in password):
+        raise HTTPException(status_code=400, detail="비밀번호에 숫자가 포함되어야 해요")
 
 
-# ─── 문제 ───────────────────────────────────────────
-
-@app.get("/subjects", dependencies=[Depends(verify)])
-def get_subjects():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-        SELECT e.subject, COUNT(q.id) as count
-        FROM questions q
-        JOIN exams e ON q.exam_id = e.id
-        WHERE e.subject IS NOT NULL AND e.subject != ''
-        GROUP BY e.subject
-        ORDER BY e.subject
-    """)
-    rows = [dict(r) for r in c.fetchall()]
-    conn.close()
-    return rows
-
-@app.get("/questions", dependencies=[Depends(verify)])
-def get_questions(exam_id: Optional[int] = None, subject: Optional[str] = None):
-    conn = get_db()
-    c = conn.cursor()
-
-    query = """
-        SELECT q.*, e.year, e.month, e.day, e.subject, e.grade
-        FROM questions q
-        JOIN exams e ON q.exam_id = e.id
-        WHERE 1=1
-    """
-    params = []
-
-    if exam_id:
-        query += " AND q.exam_id = ?"
-        params.append(exam_id)
-    if subject:
-        query += " AND e.subject = ?"
-        params.append(subject)
-
-    query += " ORDER BY q.exam_id, q.number"
-    c.execute(query, params)
-    questions = [dict(row) for row in c.fetchall()]
-
-    for q in questions:
-        c.execute("SELECT * FROM choices WHERE question_id = ? ORDER BY number", (q["id"],))
-        q["choices"] = [dict(r) for r in c.fetchall()]
-
-    conn.close()
-    return questions
+@app.post("/auth/signup")
+def signup(req: AuthRequest):
+    validate_password(req.password)
+    sb = get_supabase()
+    try:
+        res = sb.auth.sign_up({"email": req.email, "password": req.password})
+        if not res.user:
+            raise HTTPException(status_code=400, detail="회원가입 실패")
+        return {"message": "회원가입 완료", "user_id": str(res.user.id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        msg = str(e).lower()
+        if "already registered" in msg or "already been registered" in msg:
+            raise HTTPException(status_code=409, detail="이미 가입된 이메일이에요. 로그인해주세요.")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/questions/random", dependencies=[Depends(verify)])
+@app.post("/auth/login")
+def login(req: AuthRequest):
+    sb = get_supabase()
+    try:
+        res = sb.auth.sign_in_with_password({"email": req.email, "password": req.password})
+        if not res.session:
+            raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 틀렸어요")
+        return {
+            "access_token": res.session.access_token,
+            "user_id": str(res.user.id),
+            "email": res.user.email,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        msg = str(e).lower()
+        if "email not confirmed" in msg or "not confirmed" in msg:
+            raise HTTPException(status_code=401, detail="이메일 인증이 필요해요. 받은편지함을 확인해주세요.")
+        raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 틀렸어요")
+
+
+@app.post("/auth/forgot-password")
+def forgot_password(req: ForgotPasswordRequest):
+    sb = get_supabase()
+    try:
+        sb.auth.reset_password_for_email(
+            req.email,
+            options={"redirect_to": "http://192.168.50.102:8008/reset-password"}
+        )
+        return {"message": "비밀번호 재설정 이메일을 보냈어요"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/auth/update-password")
+def update_password(req: UpdatePasswordRequest, user_id: str = Depends(get_current_user)):
+    validate_password(req.password)
+    sb = get_supabase()
+    try:
+        sb.auth.admin.update_user_by_id(user_id, {"password": req.password})
+        return {"message": "비밀번호가 변경됐어요"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/auth/me")
+def me(user_id: str = Depends(get_current_user)):
+    return {"user_id": user_id}
+
+
+# ─── 헬퍼 ─────────────────────────────────────────────
+
+def flatten_question(q: dict) -> dict:
+    exam = q.pop("exam_exams", None) or {}
+    choices = q.pop("exam_choices", None) or []
+    q.update(exam)
+    q["choices"] = sorted(choices, key=lambda c: c["number"])
+    return q
+
+
+def fetch_questions_by_ids(sb, ids: list) -> list:
+    if not ids:
+        return []
+    res = sb.table("exam_questions").select(
+        "*, exam_exams!inner(year, month, day, subject, grade), exam_choices(id, number, text, is_correct)"
+    ).in_("id", ids).execute()
+    return [flatten_question(q) for q in res.data]
+
+
+# ─── 과목 ────────────────────────────────────────────
+
+@app.get("/subjects")
+def get_subjects(user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    res = sb.table("exam_questions").select("id, exam_exams!inner(subject)").execute()
+    counts = {}
+    for q in res.data:
+        subj = (q.get("exam_exams") or {}).get("subject", "")
+        if subj:
+            counts[subj] = counts.get(subj, 0) + 1
+    return [{"subject": s, "count": c} for s, c in sorted(counts.items())]
+
+
+# ─── 문제 ────────────────────────────────────────────
+
+@app.get("/questions/random")
 def get_random_questions(
     count: int = 20,
     subject: Optional[str] = None,
     source: Optional[str] = None,
     exam_ids: Optional[str] = None,
+    user_id: str = Depends(get_current_user),
 ):
-    conn = get_db()
-    c = conn.cursor()
-
-    query = """
-        SELECT q.id FROM questions q
-        JOIN exams e ON q.exam_id = e.id
-        WHERE 1=1
-    """
-    params = []
+    sb = get_supabase()
+    query = sb.table("exam_questions").select("id, exam_exams!inner(subject)")
 
     if subject:
-        query += " AND e.subject = ?"
-        params.append(subject)
-
+        query = query.eq("exam_exams.subject", subject)
     if exam_ids:
         id_list = [int(i) for i in exam_ids.split(",") if i.strip().isdigit()]
         if id_list:
-            query += f" AND q.exam_id IN ({','.join(['?'] * len(id_list))})"
-            params.extend(id_list)
+            query = query.in_("exam_id", id_list)
+
+    all_res = query.execute()
+    all_ids = [q["id"] for q in all_res.data]
 
     if source == "wrong":
-        query += " AND q.id IN (SELECT question_id FROM wrong_notes WHERE is_dismissed = 0)"
+        wrong_res = sb.table("exam_wrong_notes").select("question_id").eq("user_id", user_id).eq("is_dismissed", 0).execute()
+        wrong_ids = set(w["question_id"] for w in wrong_res.data)
+        all_ids = [i for i in all_ids if i in wrong_ids]
     elif source == "scrap":
-        query += " AND q.id IN (SELECT question_id FROM scraps)"
-
-    c.execute(query, params)
-    all_ids = [row["id"] for row in c.fetchall()]
+        scrap_res = sb.table("exam_scraps").select("question_id").eq("user_id", user_id).execute()
+        scrap_ids = set(s["question_id"] for s in scrap_res.data)
+        all_ids = [i for i in all_ids if i in scrap_ids]
 
     if not all_ids:
-        conn.close()
         return []
 
-    selected_ids = random.sample(all_ids, min(count, len(all_ids)))
-
-    questions = []
-    for qid in selected_ids:
-        c.execute("""
-            SELECT q.*, e.year, e.month, e.day, e.subject, e.grade
-            FROM questions q
-            JOIN exams e ON q.exam_id = e.id
-            WHERE q.id = ?
-        """, (qid,))
-        q = dict(c.fetchone())
-        c.execute("SELECT * FROM choices WHERE question_id = ? ORDER BY number", (qid,))
-        q["choices"] = [dict(r) for r in c.fetchall()]
-        questions.append(q)
-
-    conn.close()
-    return questions
+    selected = random.sample(all_ids, min(count, len(all_ids)))
+    return fetch_questions_by_ids(sb, selected)
 
 
-@app.get("/questions/exam-mode", dependencies=[Depends(verify)])
-def get_exam_mode_questions(subjects: str, question_mode: str = "random"):
+@app.get("/questions/exam-mode")
+def get_exam_mode_questions(
+    subjects: str,
+    question_mode: str = "random",
+    user_id: str = Depends(get_current_user),
+):
+    sb = get_supabase()
     subject_list = [s.strip() for s in subjects.split(",") if s.strip()]
-    conn = get_db()
-    c = conn.cursor()
     all_questions = []
 
     if question_mode == "by_exam":
-        used_exams = {}
+        used_exams: dict[str, list] = {}
         for subject in subject_list:
             used = used_exams.setdefault(subject, [])
+            exams_q = sb.table("exam_exams").select("id").eq("subject", subject)
             if used:
-                ph = ','.join(['?'] * len(used))
-                c.execute(f"SELECT id FROM exams WHERE subject=? AND id NOT IN ({ph})", [subject] + used)
-            else:
-                c.execute("SELECT id FROM exams WHERE subject=?", (subject,))
-            rows = c.fetchall()
+                exams_q = exams_q.not_.in_("id", used)
+            exams_res = exams_q.execute()
+            rows = exams_res.data
             if not rows:
-                c.execute("SELECT id FROM exams WHERE subject=?", (subject,))
-                rows = c.fetchall()
+                exams_res = sb.table("exam_exams").select("id").eq("subject", subject).execute()
+                rows = exams_res.data
             if not rows:
                 continue
             exam_id = random.choice(rows)["id"]
             used.append(exam_id)
-            c.execute("""
-                SELECT q.*, e.year, e.month, e.day, e.subject, e.grade
-                FROM questions q JOIN exams e ON q.exam_id = e.id
-                WHERE q.exam_id = ? ORDER BY q.number
-            """, (exam_id,))
-            qs = [dict(r) for r in c.fetchall()]
-            for q in qs:
-                c.execute("SELECT * FROM choices WHERE question_id = ? ORDER BY number", (q["id"],))
-                q["choices"] = [dict(r) for r in c.fetchall()]
+            ids_res = sb.table("exam_questions").select("id").eq("exam_id", exam_id).order("number").execute()
+            qs = fetch_questions_by_ids(sb, [r["id"] for r in ids_res.data])
             all_questions.extend(qs)
     else:
         for subject in subject_list:
-            c.execute("""
-                SELECT q.id FROM questions q
-                JOIN exams e ON q.exam_id = e.id WHERE e.subject = ?
-            """, (subject,))
-            ids = [r["id"] for r in c.fetchall()]
+            ids_res = sb.table("exam_questions").select("id, exam_exams!inner(subject)").eq("exam_exams.subject", subject).execute()
+            ids = [r["id"] for r in ids_res.data]
             if not ids:
                 continue
-            for qid in random.sample(ids, min(20, len(ids))):
-                c.execute("""
-                    SELECT q.*, e.year, e.month, e.day, e.subject, e.grade
-                    FROM questions q JOIN exams e ON q.exam_id = e.id WHERE q.id = ?
-                """, (qid,))
-                q = dict(c.fetchone())
-                c.execute("SELECT * FROM choices WHERE question_id = ? ORDER BY number", (qid,))
-                q["choices"] = [dict(r) for r in c.fetchall()]
-                all_questions.append(q)
+            selected = random.sample(ids, min(20, len(ids)))
+            all_questions.extend(fetch_questions_by_ids(sb, selected))
 
-    conn.close()
     return all_questions
 
 
-@app.get("/questions/by_ids", dependencies=[Depends(verify)])
-def get_questions_by_ids(ids: str):
+@app.get("/questions/by_ids")
+def get_questions_by_ids(ids: str, user_id: str = Depends(get_current_user)):
     id_list = [int(i) for i in ids.split(",") if i.strip().isdigit()]
-    if not id_list:
-        return []
-    conn = get_db()
-    c = conn.cursor()
-    questions = []
-    for qid in id_list:
-        c.execute("""
-            SELECT q.*, e.year, e.month, e.day, e.subject, e.grade
-            FROM questions q
-            JOIN exams e ON q.exam_id = e.id
-            WHERE q.id = ?
-        """, (qid,))
-        row = c.fetchone()
-        if row:
-            q = dict(row)
-            c.execute("SELECT * FROM choices WHERE question_id = ? ORDER BY number", (qid,))
-            q["choices"] = [dict(r) for r in c.fetchall()]
-            questions.append(q)
-    conn.close()
-    return questions
+    return fetch_questions_by_ids(get_supabase(), id_list)
 
 
-@app.get("/questions/deeplink", dependencies=[Depends(verify)])
-def get_question_by_deeplink(year: int, exam_type: str, question_no: int, subject: str):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-        SELECT q.*, e.year, e.month, e.day, e.subject, e.grade
-        FROM questions q
-        JOIN exams e ON q.exam_id = e.id
-        WHERE e.year = ? AND e.region = ? AND e.subject = ? AND q.number = ?
-        ORDER BY e.month ASC, e.day ASC
-        LIMIT 1
-    """, (year, exam_type, subject, question_no))
-    row = c.fetchone()
-    if not row:
-        conn.close()
+@app.get("/questions/deeplink")
+def get_question_by_deeplink(
+    year: int,
+    exam_type: str,
+    question_no: int,
+    subject: str,
+    user_id: str = Depends(get_current_user),
+):
+    sb = get_supabase()
+    exams_res = sb.table("exam_exams").select("id").eq("year", year).eq("region", exam_type).eq("subject", subject).order("month").order("day").execute()
+    if not exams_res.data:
         raise HTTPException(status_code=404, detail="Question not found")
-    q = dict(row)
-    c.execute("SELECT * FROM choices WHERE question_id = ? ORDER BY number", (q["id"],))
-    q["choices"] = [dict(r) for r in c.fetchall()]
-    conn.close()
-    return q
-
-
-@app.get("/questions/{question_id}", dependencies=[Depends(verify)])
-def get_question(question_id: int):
-    conn = get_db()
-    c = conn.cursor()
-
-    c.execute("""
-        SELECT q.*, e.year, e.month, e.day, e.subject, e.grade
-        FROM questions q
-        JOIN exams e ON q.exam_id = e.id
-        WHERE q.id = ?
-    """, (question_id,))
-    row = c.fetchone()
-
-    if not row:
+    exam_id = exams_res.data[0]["id"]
+    q_res = sb.table("exam_questions").select(
+        "*, exam_exams!inner(year, month, day, subject, grade), exam_choices(id, number, text, is_correct)"
+    ).eq("exam_id", exam_id).eq("number", question_no).execute()
+    if not q_res.data:
         raise HTTPException(status_code=404, detail="Question not found")
-
-    q = dict(row)
-    c.execute("SELECT * FROM choices WHERE question_id = ? ORDER BY number", (question_id,))
-    q["choices"] = [dict(r) for r in c.fetchall()]
-
-    conn.close()
-    return q
+    return flatten_question(q_res.data[0])
 
 
-# ─── 풀이 기록 ───────────────────────────────────────
+@app.get("/questions/{question_id}")
+def get_question(question_id: int, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    res = sb.table("exam_questions").select(
+        "*, exam_exams!inner(year, month, day, subject, grade), exam_choices(id, number, text, is_correct)"
+    ).eq("id", question_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Question not found")
+    return flatten_question(res.data[0])
+
+
+@app.get("/questions")
+def get_questions(
+    exam_id: Optional[int] = None,
+    subject: Optional[str] = None,
+    user_id: str = Depends(get_current_user),
+):
+    sb = get_supabase()
+    query = sb.table("exam_questions").select(
+        "*, exam_exams!inner(year, month, day, subject, grade), exam_choices(id, number, text, is_correct)"
+    )
+    if exam_id:
+        query = query.eq("exam_id", exam_id)
+    if subject:
+        query = query.eq("exam_exams.subject", subject)
+    res = query.order("exam_id").order("number").execute()
+    return [flatten_question(q) for q in res.data]
+
+
+# ─── 풀이 기록 ────────────────────────────────────────
 
 class SolveRequest(BaseModel):
     question_id: int
@@ -319,81 +306,59 @@ class SolveRequest(BaseModel):
     session_id: Optional[int] = None
 
 
-@app.post("/solve", dependencies=[Depends(verify)])
-def submit_solve(req: SolveRequest):
-    conn = get_db()
-    c = conn.cursor()
+@app.post("/solve")
+def submit_solve(req: SolveRequest, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
 
-    # 정답 확인
-    c.execute("SELECT is_correct FROM choices WHERE question_id = ? AND number = ?",
-              (req.question_id, req.selected_choice))
-    row = c.fetchone()
-    if not row:
+    choice_res = sb.table("exam_choices").select("is_correct").eq("question_id", req.question_id).eq("number", req.selected_choice).execute()
+    if not choice_res.data:
         raise HTTPException(status_code=404, detail="Choice not found")
+    is_correct = choice_res.data[0]["is_correct"]
 
-    is_correct = row["is_correct"]
+    sb.table("exam_solve_history").insert({
+        "user_id": user_id,
+        "question_id": req.question_id,
+        "selected_choice": req.selected_choice,
+        "is_correct": is_correct,
+        "time_taken": req.time_taken or 0,
+        "session_id": req.session_id,
+    }).execute()
 
-    # 풀이 기록 저장
-    c.execute("""
-        INSERT INTO solve_history (question_id, selected_choice, is_correct, time_taken, session_id)
-        VALUES (?, ?, ?, ?, ?)
-    """, (req.question_id, req.selected_choice, is_correct, req.time_taken, req.session_id))
-
-    # 오답이면 오답노트 추가
     if not is_correct:
-        c.execute("""
-            INSERT OR IGNORE INTO wrong_notes (question_id, is_dismissed)
-            VALUES (?, 0)
-        """, (req.question_id,))
-        # 이미 있으면 dismissed 해제
-        c.execute("""
-            UPDATE wrong_notes SET is_dismissed = 0 WHERE question_id = ?
-        """, (req.question_id,))
+        existing = sb.table("exam_wrong_notes").select("id, is_dismissed").eq("user_id", user_id).eq("question_id", req.question_id).execute()
+        if not existing.data:
+            sb.table("exam_wrong_notes").insert({"user_id": user_id, "question_id": req.question_id, "is_dismissed": 0}).execute()
+        else:
+            sb.table("exam_wrong_notes").update({"is_dismissed": 0}).eq("user_id", user_id).eq("question_id", req.question_id).execute()
     else:
-        # 정답이면 auto_remove 설정 확인
-        c.execute("SELECT auto_remove_wrong FROM settings WHERE id = 1")
-        settings = c.fetchone()
-        if settings and settings["auto_remove_wrong"]:
-            c.execute("DELETE FROM wrong_notes WHERE question_id = ?", (req.question_id,))
-
-    conn.commit()
-    conn.close()
+        settings_res = sb.table("exam_settings").select("auto_remove_wrong").eq("user_id", user_id).execute()
+        if settings_res.data and settings_res.data[0].get("auto_remove_wrong"):
+            sb.table("exam_wrong_notes").delete().eq("user_id", user_id).eq("question_id", req.question_id).execute()
 
     return {"is_correct": bool(is_correct)}
 
 
 # ─── 오답노트 ─────────────────────────────────────────
 
-@app.get("/wrong-notes", dependencies=[Depends(verify)])
-def get_wrong_notes():
-    conn = get_db()
-    c = conn.cursor()
-
-    c.execute("""
-        SELECT q.*, e.year, e.month, e.day, e.subject, e.grade, wn.added_at, wn.memo
-        FROM wrong_notes wn
-        JOIN questions q ON wn.question_id = q.id
-        JOIN exams e ON q.exam_id = e.id
-        WHERE wn.is_dismissed = 0
-        ORDER BY wn.added_at DESC
-    """)
-    questions = [dict(row) for row in c.fetchall()]
-
+@app.get("/wrong-notes")
+def get_wrong_notes(user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    wn_res = sb.table("exam_wrong_notes").select("question_id, added_at, memo").eq("user_id", user_id).eq("is_dismissed", 0).order("added_at", desc=True).execute()
+    if not wn_res.data:
+        return []
+    q_ids = [w["question_id"] for w in wn_res.data]
+    meta = {w["question_id"]: {"added_at": w["added_at"], "memo": w["memo"]} for w in wn_res.data}
+    questions = fetch_questions_by_ids(sb, q_ids)
     for q in questions:
-        c.execute("SELECT * FROM choices WHERE question_id = ? ORDER BY number", (q["id"],))
-        q["choices"] = [dict(r) for r in c.fetchall()]
-
-    conn.close()
+        q.update(meta.get(q["id"], {}))
+    questions.sort(key=lambda q: meta.get(q["id"], {}).get("added_at", ""), reverse=True)
     return questions
 
 
-@app.delete("/wrong-notes/{question_id}", dependencies=[Depends(verify)])
-def remove_wrong_note(question_id: int):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("UPDATE wrong_notes SET is_dismissed = 1 WHERE question_id = ?", (question_id,))
-    conn.commit()
-    conn.close()
+@app.delete("/wrong-notes/{question_id}")
+def remove_wrong_note(question_id: int, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    sb.table("exam_wrong_notes").update({"is_dismissed": 1}).eq("user_id", user_id).eq("question_id", question_id).execute()
     return {"success": True}
 
 
@@ -401,13 +366,10 @@ class WrongNoteMemoRequest(BaseModel):
     memo: str = ""
 
 
-@app.put("/wrong-notes/{question_id}/memo", dependencies=[Depends(verify)])
-def update_wrong_note_memo(question_id: int, req: WrongNoteMemoRequest):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("UPDATE wrong_notes SET memo = ? WHERE question_id = ?", (req.memo, question_id))
-    conn.commit()
-    conn.close()
+@app.put("/wrong-notes/{question_id}/memo")
+def update_wrong_note_memo(question_id: int, req: WrongNoteMemoRequest, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    sb.table("exam_wrong_notes").update({"memo": req.memo}).eq("user_id", user_id).eq("question_id", question_id).execute()
     return {"success": True}
 
 
@@ -417,48 +379,36 @@ class ScrapRequest(BaseModel):
     memo: Optional[str] = ""
 
 
-@app.get("/scraps", dependencies=[Depends(verify)])
-def get_scraps():
-    conn = get_db()
-    c = conn.cursor()
-
-    c.execute("""
-        SELECT q.*, e.year, e.month, e.day, e.subject, e.grade, s.memo, s.created_at
-        FROM scraps s
-        JOIN questions q ON s.question_id = q.id
-        JOIN exams e ON q.exam_id = e.id
-        ORDER BY s.created_at DESC
-    """)
-    questions = [dict(row) for row in c.fetchall()]
-
+@app.get("/scraps")
+def get_scraps(user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    sc_res = sb.table("exam_scraps").select("question_id, memo, created_at").eq("user_id", user_id).order("created_at", desc=True).execute()
+    if not sc_res.data:
+        return []
+    q_ids = [s["question_id"] for s in sc_res.data]
+    meta = {s["question_id"]: {"memo": s["memo"], "created_at": s["created_at"]} for s in sc_res.data}
+    questions = fetch_questions_by_ids(sb, q_ids)
     for q in questions:
-        c.execute("SELECT * FROM choices WHERE question_id = ? ORDER BY number", (q["id"],))
-        q["choices"] = [dict(r) for r in c.fetchall()]
-
-    conn.close()
+        q.update(meta.get(q["id"], {}))
+    questions.sort(key=lambda q: meta.get(q["id"], {}).get("created_at", ""), reverse=True)
     return questions
 
 
-@app.post("/scraps/{question_id}", dependencies=[Depends(verify)])
-def add_scrap(question_id: int, req: ScrapRequest):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-        INSERT OR REPLACE INTO scraps (question_id, memo)
-        VALUES (?, ?)
-    """, (question_id, req.memo))
-    conn.commit()
-    conn.close()
+@app.post("/scraps/{question_id}")
+def add_scrap(question_id: int, req: ScrapRequest, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    existing = sb.table("exam_scraps").select("id").eq("user_id", user_id).eq("question_id", question_id).execute()
+    if existing.data:
+        sb.table("exam_scraps").update({"memo": req.memo}).eq("user_id", user_id).eq("question_id", question_id).execute()
+    else:
+        sb.table("exam_scraps").insert({"user_id": user_id, "question_id": question_id, "memo": req.memo or ""}).execute()
     return {"success": True}
 
 
-@app.delete("/scraps/{question_id}", dependencies=[Depends(verify)])
-def remove_scrap(question_id: int):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("DELETE FROM scraps WHERE question_id = ?", (question_id,))
-    conn.commit()
-    conn.close()
+@app.delete("/scraps/{question_id}")
+def remove_scrap(question_id: int, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    sb.table("exam_scraps").delete().eq("user_id", user_id).eq("question_id", question_id).execute()
     return {"success": True}
 
 
@@ -468,141 +418,65 @@ class SettingsRequest(BaseModel):
     auto_remove_wrong: bool
 
 
-@app.get("/settings", dependencies=[Depends(verify)])
-def get_settings():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT * FROM settings WHERE id = 1")
-    row = c.fetchone()
-    conn.close()
-    return dict(row)
+@app.get("/settings")
+def get_settings(user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    res = sb.table("exam_settings").select("*").eq("user_id", user_id).execute()
+    if not res.data:
+        sb.table("exam_settings").insert({"user_id": user_id, "auto_remove_wrong": 0}).execute()
+        return {"auto_remove_wrong": 0}
+    return res.data[0]
 
 
-@app.put("/settings", dependencies=[Depends(verify)])
-def update_settings(req: SettingsRequest):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-        UPDATE settings SET auto_remove_wrong = ?, updated_at = ?
-        WHERE id = 1
-    """, (1 if req.auto_remove_wrong else 0, now_kst()))
-    conn.commit()
-    conn.close()
+@app.put("/settings")
+def update_settings(req: SettingsRequest, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    sb.table("exam_settings").update({
+        "auto_remove_wrong": 1 if req.auto_remove_wrong else 0,
+        "updated_at": now_kst(),
+    }).eq("user_id", user_id).execute()
     return {"success": True}
 
 
 # ─── 시험 목록 ────────────────────────────────────────
 
-@app.get("/exams", dependencies=[Depends(verify)])
-def get_exams():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-        SELECT e.*, COUNT(q.id) AS question_count
-        FROM exams e
-        LEFT JOIN questions q ON q.exam_id = e.id
-        GROUP BY e.id
-        ORDER BY e.year DESC, e.month DESC, e.day DESC
-    """)
-    exams = [dict(row) for row in c.fetchall()]
-    conn.close()
-    return exams
+@app.get("/exams")
+def get_exams(user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    exams_res = sb.table("exam_exams").select("*").order("year", desc=True).order("month", desc=True).order("day", desc=True).execute()
+    exam_ids = [e["id"] for e in exams_res.data]
+    if not exam_ids:
+        return []
+    counts_res = sb.table("exam_questions").select("exam_id").in_("exam_id", exam_ids).execute()
+    count_map = {}
+    for q in counts_res.data:
+        count_map[q["exam_id"]] = count_map.get(q["exam_id"], 0) + 1
+    for exam in exams_res.data:
+        exam["question_count"] = count_map.get(exam["id"], 0)
+    return exams_res.data
 
 
-@app.delete("/exams/{exam_id}", dependencies=[Depends(verify)])
-def delete_exam(exam_id: int):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT id FROM exams WHERE id = ?", (exam_id,))
-    if not c.fetchone():
-        conn.close()
+@app.delete("/exams/{exam_id}")
+def delete_exam(exam_id: int, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    exam_res = sb.table("exam_exams").select("id").eq("id", exam_id).execute()
+    if not exam_res.data:
         raise HTTPException(status_code=404, detail="Exam not found")
-    c.execute("DELETE FROM solve_history WHERE question_id IN (SELECT id FROM questions WHERE exam_id = ?)", (exam_id,))
-    c.execute("DELETE FROM wrong_notes WHERE question_id IN (SELECT id FROM questions WHERE exam_id = ?)", (exam_id,))
-    c.execute("DELETE FROM scraps WHERE question_id IN (SELECT id FROM questions WHERE exam_id = ?)", (exam_id,))
-    c.execute("DELETE FROM choices WHERE question_id IN (SELECT id FROM questions WHERE exam_id = ?)", (exam_id,))
-    c.execute("DELETE FROM questions WHERE exam_id = ?", (exam_id,))
-    c.execute("DELETE FROM sessions WHERE exam_id = ?", (exam_id,))
-    c.execute("DELETE FROM upload_logs WHERE exam_id = ?", (exam_id,))
-    c.execute("DELETE FROM exams WHERE id = ?", (exam_id,))
-    conn.commit()
-    conn.close()
+
+    q_res = sb.table("exam_questions").select("id").eq("exam_id", exam_id).execute()
+    q_ids = [q["id"] for q in q_res.data]
+
+    if q_ids:
+        sb.table("exam_solve_history").delete().in_("question_id", q_ids).execute()
+        sb.table("exam_wrong_notes").delete().in_("question_id", q_ids).execute()
+        sb.table("exam_scraps").delete().in_("question_id", q_ids).execute()
+        sb.table("exam_choices").delete().in_("question_id", q_ids).execute()
+        sb.table("exam_questions").delete().in_("id", q_ids).execute()
+
+    sb.table("exam_sessions").delete().eq("exam_id", exam_id).execute()
+    sb.table("exam_upload_logs").delete().eq("exam_id", exam_id).execute()
+    sb.table("exam_exams").delete().eq("id", exam_id).execute()
     return {"ok": True}
-
-
-
-# ─── DB 마이그레이션 ──────────────────────────────────────────────────────
-
-def migrate_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.executescript("""
-        CREATE TABLE IF NOT EXISTS exams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            year INTEGER, month INTEGER, day INTEGER,
-            subject TEXT, grade TEXT, region TEXT, source_file TEXT
-        );
-        CREATE TABLE IF NOT EXISTS questions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            exam_id INTEGER, number INTEGER,
-            question_text TEXT, question_image TEXT, explanation TEXT,
-            FOREIGN KEY (exam_id) REFERENCES exams(id)
-        );
-        CREATE TABLE IF NOT EXISTS choices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            question_id INTEGER, number INTEGER,
-            text TEXT, is_correct INTEGER DEFAULT 0,
-            FOREIGN KEY (question_id) REFERENCES questions(id)
-        );
-        CREATE TABLE IF NOT EXISTS solve_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            question_id INTEGER, selected_choice INTEGER,
-            is_correct INTEGER, time_taken INTEGER DEFAULT 0,
-            session_id INTEGER,
-            solved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (question_id) REFERENCES questions(id)
-        );
-        CREATE TABLE IF NOT EXISTS wrong_notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            question_id INTEGER UNIQUE, is_dismissed INTEGER DEFAULT 0,
-            memo TEXT DEFAULT '', added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (question_id) REFERENCES questions(id)
-        );
-        CREATE TABLE IF NOT EXISTS scraps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            question_id INTEGER UNIQUE, memo TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (question_id) REFERENCES questions(id)
-        );
-        CREATE TABLE IF NOT EXISTS sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mode TEXT, subject TEXT, exam_id INTEGER,
-            total_count INTEGER DEFAULT 0, correct_count INTEGER DEFAULT 0,
-            skipped_count INTEGER DEFAULT 0, duration INTEGER DEFAULT 0,
-            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, ended_at TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS settings (
-            id INTEGER PRIMARY KEY DEFAULT 1,
-            auto_remove_wrong INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        INSERT OR IGNORE INTO settings (id, auto_remove_wrong) VALUES (1, 0);
-    """)
-    existing_sh = [row[1] for row in c.execute("PRAGMA table_info(solve_history)")]
-    if "time_taken" not in existing_sh:
-        c.execute("ALTER TABLE solve_history ADD COLUMN time_taken INTEGER DEFAULT 0")
-    if "session_id" not in existing_sh:
-        c.execute("ALTER TABLE solve_history ADD COLUMN session_id INTEGER")
-    existing_wn = [row[1] for row in c.execute("PRAGMA table_info(wrong_notes)")]
-    if "memo" not in existing_wn:
-        c.execute("ALTER TABLE wrong_notes ADD COLUMN memo TEXT DEFAULT ''")
-    if "added_at" not in existing_wn:
-        c.execute("ALTER TABLE wrong_notes ADD COLUMN added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-    conn.commit()
-    conn.close()
-
-migrate_db()
 
 
 # ─── 세션 ────────────────────────────────────────────
@@ -620,115 +494,104 @@ class SessionEndRequest(BaseModel):
     duration: int
 
 
-@app.post("/sessions", dependencies=[Depends(verify)])
-def start_session(req: SessionStartRequest):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO sessions (mode, subject, exam_id, total_count)
-        VALUES (?, ?, ?, ?)
-    """, (req.mode, req.subject, req.exam_id, req.total_count))
-    session_id = c.lastrowid
-    conn.commit()
-    conn.close()
+@app.post("/sessions")
+def start_session(req: SessionStartRequest, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    res = sb.table("exam_sessions").insert({
+        "user_id": user_id,
+        "mode": req.mode,
+        "subject": req.subject,
+        "exam_id": req.exam_id,
+        "total_count": req.total_count,
+    }).execute()
+    session_id = res.data[0]["id"]
     return {"session_id": session_id}
 
 
-@app.put("/sessions/{session_id}/end", dependencies=[Depends(verify)])
-def end_session(session_id: int, req: SessionEndRequest):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-        UPDATE sessions SET correct_count=?, skipped_count=?, duration=?, ended_at=?
-        WHERE id=?
-    """, (req.correct_count, req.skipped_count, req.duration, now_kst(), session_id))
-    conn.commit()
-    conn.close()
+@app.put("/sessions/{session_id}/end")
+def end_session(session_id: int, req: SessionEndRequest, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    sb.table("exam_sessions").update({
+        "correct_count": req.correct_count,
+        "skipped_count": req.skipped_count,
+        "duration": req.duration,
+        "ended_at": now_kst(),
+    }).eq("id", session_id).eq("user_id", user_id).execute()
     return {"success": True}
 
 
 # ─── 통계 ────────────────────────────────────────────
 
-@app.get("/stats/overview", dependencies=[Depends(verify)])
-def get_stats_overview():
-    conn = get_db()
-    c = conn.cursor()
+@app.get("/stats/overview")
+def get_stats_overview(user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
 
-    c.execute("SELECT COUNT(*) as cnt FROM questions")
-    total_questions = c.fetchone()["cnt"]
+    total_q_res = sb.table("exam_questions").select("id", count="exact").execute()
+    total_questions = total_q_res.count or 0
 
-    # 오답/스크랩 세션 제외
-    c.execute("""
-        SELECT COUNT(*) as cnt, SUM(sh.is_correct) as correct
-        FROM solve_history sh
-        LEFT JOIN sessions s ON sh.session_id = s.id
-        WHERE (sh.session_id IS NULL OR s.mode NOT IN ('wrong', 'scrap'))
-    """)
-    row = c.fetchone()
-    total_solved = row["cnt"] or 0
-    total_correct = int(row["correct"] or 0)
+    excluded_res = sb.table("exam_sessions").select("id").eq("user_id", user_id).in_("mode", ["wrong", "scrap"]).execute()
+    excluded_ids = {s["id"] for s in excluded_res.data}
 
-    c.execute("""
-        SELECT e.subject,
-               COUNT(sh.id) as solved,
-               SUM(sh.is_correct) as correct,
-               AVG(sh.time_taken) as avg_time
-        FROM solve_history sh
-        JOIN questions q ON sh.question_id = q.id
-        JOIN exams e ON q.exam_id = e.id
-        LEFT JOIN sessions s ON sh.session_id = s.id
-        WHERE (sh.session_id IS NULL OR s.mode NOT IN ('wrong', 'scrap'))
-        GROUP BY e.subject
-        ORDER BY e.subject
-    """)
-    by_subject = [dict(r) for r in c.fetchall()]
-    for s in by_subject:
-        s["correct"] = int(s["correct"] or 0)
-        s["avg_time"] = round(s["avg_time"] or 0, 1)
+    sh_res = sb.table("exam_solve_history").select("id, question_id, is_correct, time_taken, session_id").eq("user_id", user_id).execute()
+    solve_history = [
+        sh for sh in sh_res.data
+        if sh.get("session_id") is None or sh["session_id"] not in excluded_ids
+    ]
+
+    total_solved = len(solve_history)
+    total_correct = sum(1 for s in solve_history if s["is_correct"])
+
+    q_ids = list({sh["question_id"] for sh in solve_history})
+    subject_map = {}
+    if q_ids:
+        q_res = sb.table("exam_questions").select("id, exam_exams!inner(subject)").in_("id", q_ids).execute()
+        for q in q_res.data:
+            subject_map[q["id"]] = (q.get("exam_exams") or {}).get("subject", "")
+
+    by_subject_map: dict = {}
+    for sh in solve_history:
+        subj = subject_map.get(sh["question_id"], "")
+        if subj not in by_subject_map:
+            by_subject_map[subj] = {"subject": subj, "solved": 0, "correct": 0, "total_time": 0}
+        by_subject_map[subj]["solved"] += 1
+        by_subject_map[subj]["correct"] += sh["is_correct"] or 0
+        by_subject_map[subj]["total_time"] += sh["time_taken"] or 0
+
+    by_subject = []
+    for s in sorted(by_subject_map.values(), key=lambda x: x["subject"]):
+        s["avg_time"] = round(s["total_time"] / s["solved"], 1) if s["solved"] else 0
         s["accuracy"] = round(s["correct"] / s["solved"] * 100, 1) if s["solved"] else 0
+        del s["total_time"]
+        by_subject.append(s)
 
-    c.execute("""
-        SELECT s.*, e.year AS exam_year, e.month AS exam_month, e.day AS exam_day
-        FROM sessions s
-        LEFT JOIN exams e ON s.exam_id = e.id
-        WHERE s.ended_at IS NOT NULL AND s.mode NOT IN ('wrong', 'scrap')
-        ORDER BY s.started_at DESC
-        LIMIT 20
-    """)
-    recent_sessions = [dict(r) for r in c.fetchall()]
+    sessions_res = sb.table("exam_sessions").select("*, exam_exams(year, month, day)").eq("user_id", user_id).not_.is_("ended_at", "null").not_.in_("mode", ["wrong", "scrap"]).order("started_at", desc=True).limit(20).execute()
+    recent_sessions = []
+    for s in sessions_res.data:
+        exam_info = s.pop("exam_exams", None) or {}
+        s["exam_year"] = exam_info.get("year")
+        s["exam_month"] = exam_info.get("month")
+        s["exam_day"] = exam_info.get("day")
+        recent_sessions.append(s)
 
-    # 날짜별 집계 (최근 30일치, 오답/스크랩 제외)
-    c.execute("""
-        SELECT DATE(s.started_at) as date,
-               SUM(s.correct_count) as correct,
-               SUM(s.total_count - s.skipped_count) as answered,
-               COUNT(*) as session_count
-        FROM sessions s
-        WHERE s.ended_at IS NOT NULL AND s.mode NOT IN ('wrong', 'scrap')
-        GROUP BY DATE(s.started_at)
-        ORDER BY date DESC
-        LIMIT 30
-    """)
-    date_rows = [dict(r) for r in c.fetchall()]
+    all_sessions_res = sb.table("exam_sessions").select("*").eq("user_id", user_id).not_.is_("ended_at", "null").not_.in_("mode", ["wrong", "scrap"]).execute()
+    by_date_map: dict = {}
+    for s in all_sessions_res.data:
+        if not s.get("started_at"):
+            continue
+        date = s["started_at"][:10]
+        if date not in by_date_map:
+            by_date_map[date] = {"date": date, "correct": 0, "answered": 0, "session_count": 0, "sessions": []}
+        by_date_map[date]["correct"] += s.get("correct_count", 0) or 0
+        answered = (s.get("total_count", 0) or 0) - (s.get("skipped_count", 0) or 0)
+        by_date_map[date]["answered"] += answered
+        by_date_map[date]["session_count"] += 1
+        by_date_map[date]["sessions"].append(s)
 
     by_date = []
-    for dr in date_rows:
-        answered = dr["answered"] or 1
-        dr["accuracy"] = round(int(dr["correct"] or 0) / answered * 100, 1)
-        # 해당 날짜의 세션 목록
-        c.execute("""
-            SELECT s.*, e.year AS exam_year, e.month AS exam_month, e.day AS exam_day
-            FROM sessions s
-            LEFT JOIN exams e ON s.exam_id = e.id
-            WHERE s.ended_at IS NOT NULL
-              AND s.mode NOT IN ('wrong', 'scrap')
-              AND DATE(s.started_at) = ?
-            ORDER BY s.started_at DESC
-        """, (dr["date"],))
-        dr["sessions"] = [dict(r) for r in c.fetchall()]
-        by_date.append(dr)
+    for date, data in sorted(by_date_map.items(), reverse=True)[:30]:
+        data["accuracy"] = round(data["correct"] / max(data["answered"], 1) * 100, 1)
+        by_date.append(data)
 
-    conn.close()
     return {
         "total_questions": total_questions,
         "total_solved": total_solved,
@@ -739,18 +602,19 @@ def get_stats_overview():
         "by_date": by_date,
     }
 
-# ─── 정적 파일 서빙 (빌드된 프론트) ─────────────────────────────────────
+
+# ─── 정적 파일 서빙 ──────────────────────────────────
 
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 
 if os.path.exists(FRONTEND_DIST):
     app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
 
-    @app.get("/", dependencies=[Depends(verify)])
+    @app.get("/")
     def serve_root():
         return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
 
-    @app.get("/{full_path:path}", dependencies=[Depends(verify)])
+    @app.get("/{full_path:path}")
     def serve_spa(full_path: str):
         file_path = os.path.join(FRONTEND_DIST, full_path)
         if os.path.exists(file_path) and os.path.isfile(file_path):

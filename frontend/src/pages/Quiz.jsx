@@ -209,27 +209,29 @@ export default function Quiz() {
 
   // ── 일반 모드 ──────────────────────────────────────
 
-  const handleSelect = async (choiceNum) => {
+  const handleSelect = (choiceNum) => {
     if (result) return
+    const timeTaken = elapsed
     setSelected(choiceNum)
     setTimerActive(false)
-    try {
-      const timeTaken = elapsed
-      totalAnswerTimeRef.current += timeTaken
-      const res = await axios.post(`${API}/solve`, {
-        question_id: questions[current].id,
-        selected_choice: choiceNum,
-        time_taken: timeTaken,
-        session_id: sessionId,
-      })
-      setResult(res.data)
-      if (res.data.is_correct) {
-        correctCountRef.current += 1
-        setScore(prev => ({ correct: prev.correct + 1, total: prev.total + 1 }))
-      } else {
-        setScore(prev => ({ ...prev, total: prev.total + 1 }))
-      }
-    } catch (e) { console.error(e) }
+
+    const q = questions[current]
+    const is_correct = !!(q.choices.find(c => c.number === choiceNum)?.is_correct)
+    setResult({ is_correct })
+    if (is_correct) {
+      correctCountRef.current += 1
+      setScore(prev => ({ correct: prev.correct + 1, total: prev.total + 1 }))
+    } else {
+      setScore(prev => ({ ...prev, total: prev.total + 1 }))
+    }
+
+    totalAnswerTimeRef.current += timeTaken
+    axios.post(`${API}/solve`, {
+      question_id: q.id,
+      selected_choice: choiceNum,
+      time_taken: timeTaken,
+      session_id: sessionId,
+    }).catch(e => console.error(e))
   }
 
   const handleNext = (skipped = false) => {

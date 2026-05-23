@@ -41,6 +41,10 @@ body {
   line-height: 1.6;
 }
 
+@media (min-width: 768px) {
+  body { zoom: 1.25; }
+}
+
 button {
   cursor: pointer;
   font-family: inherit;

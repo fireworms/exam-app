@@ -17,8 +17,13 @@ def now_kst() -> str:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
+from supabase import create_client as _create_supabase_client
 from db import get_supabase
 from auth import get_current_user
+
+def _new_auth_client():
+    """로그인/회원가입 전용 클라이언트 - 싱글톤 오염 방지"""
+    return _create_supabase_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_KEY"))
 from upload_router import router as upload_router
 from edit_router import router as edit_router
 
@@ -63,7 +68,7 @@ def validate_password(password: str):
 @app.post("/auth/signup")
 def signup(req: AuthRequest):
     validate_password(req.password)
-    sb = get_supabase()
+    sb = _new_auth_client()
     try:
         res = sb.auth.sign_up({"email": req.email, "password": req.password})
         if not res.user:
@@ -80,7 +85,7 @@ def signup(req: AuthRequest):
 
 @app.post("/auth/login")
 def login(req: AuthRequest):
-    sb = get_supabase()
+    sb = _new_auth_client()
     try:
         res = sb.auth.sign_in_with_password({"email": req.email, "password": req.password})
         if not res.session:
@@ -521,6 +526,15 @@ def end_session(session_id: int, req: SessionEndRequest, user_id: str = Depends(
 
 
 # ─── 통계 ────────────────────────────────────────────
+
+@app.get("/stats/counts")
+def get_stats_counts(user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    total = sb.table("exam_questions").select("id", count="exact").execute().count or 0
+    wrong = sb.table("exam_wrong_notes").select("id", count="exact").eq("user_id", user_id).eq("is_dismissed", 0).execute().count or 0
+    scrap = sb.table("exam_scraps").select("id", count="exact").eq("user_id", user_id).execute().count or 0
+    return {"total": total, "wrong": wrong, "scrap": scrap}
+
 
 @app.get("/stats/overview")
 def get_stats_overview(user_id: str = Depends(get_current_user)):

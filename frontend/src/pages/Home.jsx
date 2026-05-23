@@ -24,14 +24,10 @@ export default function Home() {
   useEffect(() => {
     axios.get(`${API}/exams`).then(r => setExams(r.data))
     axios.get(`${API}/subjects`).then(r => setSubjects(r.data))
-    Promise.all([
-      axios.get(`${API}/questions`),
-      axios.get(`${API}/wrong-notes`),
-      axios.get(`${API}/scraps`),
-    ]).then(([q, w, s]) => setStats({
-      total: q.data.length,
-      wrong: w.data.length,
-      scrap: s.data.length,
+    axios.get(`${API}/stats/counts`).then(r => setStats({
+      total: r.data.total,
+      wrong: r.data.wrong,
+      scrap: r.data.scrap,
     }))
   }, [])
 

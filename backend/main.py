@@ -52,6 +52,9 @@ class AuthRequest(BaseModel):
 class ForgotPasswordRequest(BaseModel):
     email: str
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
 class UpdatePasswordRequest(BaseModel):
     password: str
 
@@ -92,6 +95,7 @@ def login(req: AuthRequest):
             raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 틀렸어요")
         return {
             "access_token": res.session.access_token,
+            "refresh_token": res.session.refresh_token,
             "user_id": str(res.user.id),
             "email": res.user.email,
         }
@@ -102,6 +106,23 @@ def login(req: AuthRequest):
         if "email not confirmed" in msg or "not confirmed" in msg:
             raise HTTPException(status_code=401, detail="이메일 인증이 필요해요. 받은편지함을 확인해주세요.")
         raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 틀렸어요")
+
+
+@app.post("/auth/refresh")
+def refresh_token(req: RefreshRequest):
+    sb = _new_auth_client()
+    try:
+        res = sb.auth.refresh_session(req.refresh_token)
+        if not res.session:
+            raise HTTPException(status_code=401, detail="세션 갱신 실패")
+        return {
+            "access_token": res.session.access_token,
+            "refresh_token": res.session.refresh_token,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="세션 갱신 실패")
 
 
 @app.post("/auth/forgot-password")

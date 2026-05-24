@@ -50,7 +50,7 @@ export default function Login() {
         return
       }
       if (mode === 'login') {
-        setToken(data.access_token)
+        setToken(data.access_token, data.refresh_token)
         localStorage.setItem('exam_user', data.email)
         navigate('/')
       } else {

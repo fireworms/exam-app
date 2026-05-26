@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import API, { authFetch } from '../api';
+import API from '../api';
+import axiosInstance from '../axios';
 
 const STATUS_MAP = {
   pending:    { label: "대기 중",   color: "#f59e0b", bg: "#fffbeb" },
@@ -14,8 +15,7 @@ function UploadLogs() {
 
   const fetchLogs = async () => {
     try {
-      const res = await authFetch(`${API}/upload/logs`);
-      const data = await res.json();
+      const { data } = await axiosInstance.get(`${API}/upload/logs`);
       setLogs(data.logs);
     } catch (e) {
       console.error(e);
@@ -101,8 +101,7 @@ function ExamManager() {
 
   const fetchExams = async () => {
     try {
-      const res = await authFetch(`${API}/exams`);
-      const data = await res.json();
+      const { data } = await axiosInstance.get(`${API}/exams`);
       setExams(data);
     } catch (e) {
       console.error(e);
@@ -116,11 +115,9 @@ function ExamManager() {
   const handleDelete = async (examId) => {
     setDeleting(true);
     try {
-      const res = await authFetch(`${API}/exams/${examId}`, { method: "DELETE" });
-      if (res.ok) {
-        setExams(prev => prev.filter(e => e.id !== examId));
-        setConfirmId(null);
-      }
+      await axiosInstance.delete(`${API}/exams/${examId}`);
+      setExams(prev => prev.filter(e => e.id !== examId));
+      setConfirmId(null);
     } catch (e) {
       console.error(e);
     } finally {

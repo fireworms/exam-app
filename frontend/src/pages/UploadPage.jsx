@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
-import API, { authFetch } from '../api';
+import API from '../api';
+import axiosInstance from '../axios';
 
 const JSON_FORMAT_TEMPLATE = `{
   "exam": {
@@ -99,22 +100,14 @@ export default function UploadPage() {
         prev.map((i) => (i.name === item.name ? { ...i, status: "uploading" } : i))
       );
       try {
-        const res = await authFetch(`${API}/upload/json`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(item.parsed),
-        });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.detail || "서버 오류");
-        }
-        const data = await res.json();
+        const { data } = await axiosInstance.post(`${API}/upload/json`, item.parsed);
         setJsonItems((prev) =>
           prev.map((i) => (i.name === item.name ? { ...i, status: "done", result: data } : i))
         );
       } catch (e) {
+        const msg = e.response?.data?.detail || e.message || "서버 오류";
         setJsonItems((prev) =>
-          prev.map((i) => (i.name === item.name ? { ...i, status: "error", error: e.message } : i))
+          prev.map((i) => (i.name === item.name ? { ...i, status: "error", error: msg } : i))
         );
       }
     }
@@ -137,14 +130,10 @@ export default function UploadPage() {
     for (const f of selectedFiles) formData.append("files", f);
 
     try {
-      const res = await authFetch(`${API}/upload/analyze`, {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
+      const { data } = await axiosInstance.post(`${API}/upload/analyze`, formData);
       setFiles(data.files.map((f) => ({ ...f, skip: f.is_duplicate })));
     } catch (e) {
-      alert("분석 실패: " + e.message);
+      alert("분석 실패: " + (e.response?.data?.detail || e.message));
     } finally {
       setLoading(false);
     }
@@ -172,24 +161,19 @@ export default function UploadPage() {
     }
     setConfirming(true);
     try {
-      const res = await authFetch(`${API}/upload/confirm`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: toUpload.map((f) => ({
-            filename: f.filename,
-            exam_info: f.parsed,
-            parser,
-          })),
-        }),
+      const { data } = await axiosInstance.post(`${API}/upload/confirm`, {
+        items: toUpload.map((f) => ({
+          filename: f.filename,
+          exam_info: f.parsed,
+          parser,
+        })),
       });
-      const data = await res.json();
       if (data.started) {
         setDone(true);
         setFiles([]);
       }
     } catch (e) {
-      alert("컨펌 실패: " + e.message);
+      alert("컨펌 실패: " + (e.response?.data?.detail || e.message));
     } finally {
       setConfirming(false);
     }

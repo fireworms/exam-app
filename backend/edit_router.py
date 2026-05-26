@@ -13,6 +13,14 @@ IMAGE_DIR = os.path.join(BASE_DIR, "images")
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
 
+def _resolve_path(path: str) -> str:
+    """백슬래시 및 상대경로를 절대경로로 정규화."""
+    path = path.replace("\\", "/")
+    if not os.path.isabs(path):
+        path = os.path.join(BASE_DIR, path)
+    return path
+
+
 class ChoiceUpdate(BaseModel):
     id: int
     text: str
@@ -33,8 +41,10 @@ async def upload_image(question_id: int, file: UploadFile = File(...), user_id: 
         raise HTTPException(status_code=404, detail="문제를 찾을 수 없어요")
 
     old_path = q_res.data[0].get("question_image")
-    if old_path and os.path.exists(old_path):
-        os.remove(old_path)
+    if old_path:
+        old_path = _resolve_path(old_path)
+        if os.path.exists(old_path):
+            os.remove(old_path)
 
     ext = os.path.splitext(file.filename)[1].lower() or ".jpg"
     filename = f"q_{question_id}{ext}"
@@ -52,7 +62,7 @@ def delete_image(question_id: int, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     q_res = sb.table("exam_questions").select("question_image").eq("id", question_id).execute()
     if q_res.data and q_res.data[0].get("question_image"):
-        path = q_res.data[0]["question_image"]
+        path = _resolve_path(q_res.data[0]["question_image"])
         if os.path.exists(path):
             os.remove(path)
         sb.table("exam_questions").update({"question_image": None}).eq("id", question_id).execute()
@@ -65,7 +75,7 @@ def get_image(question_id: int):
     q_res = sb.table("exam_questions").select("question_image").eq("id", question_id).execute()
     if not q_res.data or not q_res.data[0].get("question_image"):
         raise HTTPException(status_code=404, detail="이미지 없음")
-    path = q_res.data[0]["question_image"]
+    path = _resolve_path(q_res.data[0]["question_image"])
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="이미지 파일 없음")
     return FileResponse(path)

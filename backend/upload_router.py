@@ -148,6 +148,33 @@ def parse_with_gemini(pdf_bytes: bytes) -> dict:
     raise Exception(f"{max_retries}번 시도 실패")
 
 
+def _extract_passage(question_text: str) -> str:
+    """[N~M] 공통지문 문제에서 지문 부분만 추출 (마지막 질문 라인 제외)."""
+    parts = question_text.split('\n\n')
+    if len(parts) <= 1:
+        return question_text
+    return '\n\n'.join(parts[:-1])
+
+
+def _resolve_shared_passages(questions: list) -> list:
+    """(N번 공통지문 문제) 패턴의 문제에 N번 문제의 지문을 삽입."""
+    num_to_text = {q.get('number'): q.get('question_text', '') for q in questions}
+    result = []
+    for q in questions:
+        text = q.get('question_text', '')
+        match = re.search(r'\((\d+)번 공통지문 문제\)', text)
+        if match:
+            ref_num = int(match.group(1))
+            ref_text = num_to_text.get(ref_num, '')
+            if ref_text:
+                passage = _extract_passage(ref_text)
+                clean_text = re.sub(r'\s*\(\d+번 공통지문 문제\)', '', text).strip()
+                q = dict(q)
+                q['question_text'] = passage + '\n\n' + clean_text
+        result.append(q)
+    return result
+
+
 def save_to_db(exam_info: dict, data: dict, source_file: str) -> int:
     sb = get_supabase()
     exam_res = sb.table("exam_exams").insert({
@@ -158,6 +185,7 @@ def save_to_db(exam_info: dict, data: dict, source_file: str) -> int:
     exam_id = exam_res.data[0]["id"]
 
     questions_list = data.get("questions", data) if isinstance(data, dict) else data
+    questions_list = _resolve_shared_passages(questions_list)
     for i, q in enumerate(questions_list):
         number = q.get("number") or q.get("question_number") or q.get("no") or (i + 1)
         question_text = q.get("question_text") or q.get("question") or q.get("text") or ""

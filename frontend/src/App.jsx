@@ -5,8 +5,7 @@ import Quiz from './pages/Quiz'
 import WrongNotes from './pages/WrongNotes'
 import Scraps from './pages/Scraps'
 import Settings from './pages/Settings'
-import UploadPage from "./pages/UploadPage"
-import LogsPage from "./pages/LogsPage"
+import Admin from './pages/Admin'
 import EditQuestion from './pages/EditQuestion'
 import Stats from './pages/Stats'
 import Login from './pages/Login'
@@ -35,8 +34,9 @@ export default function App() {
           <Route path="wrong-notes" element={<WrongNotes />} />
           <Route path="scraps" element={<Scraps />} />
           <Route path="settings" element={<Settings />} />
-          <Route path="upload" element={<UploadPage />} />
-          <Route path="logs" element={<LogsPage />} />
+          <Route path="admin" element={<Admin />} />
+          <Route path="upload" element={<Navigate to="/admin" replace />} />
+          <Route path="logs" element={<Navigate to="/admin" replace />} />
           <Route path="edit/:question_id" element={<EditQuestion />} />
           <Route path="stats" element={<Stats />} />
         </Route>

@@ -44,8 +44,8 @@ nohup uvicorn main:app --host 0.0.0.0 --port 8008 > /tmp/backend.log 2>&1 &
 | `backend/main.py` | 메인 앱 + 대부분 엔드포인트 |
 | `backend/auth.py` | JWT 검증, `get_current_user` |
 | `backend/db.py` | `get_supabase()`, `_new_auth_client()` |
-| `backend/upload_router.py` | PDF/JSON 업로드 (`/upload`) |
-| `backend/edit_router.py` | 문제 편집/이미지 (`/questions`) |
+| `backend/upload_router.py` | PDF/JSON 업로드 (`/api/upload`) |
+| `backend/edit_router.py` | 문제 편집/이미지 (`/api/questions`) |
 | `backend/images/` | 문제 이미지 파일 (`q_{id}.jpg`) |
 | `frontend/src/axios.js` | axios 인터셉터 (JWT 주입, refresh) |
 | `frontend/src/pages/` | 페이지 컴포넌트 |
@@ -78,6 +78,7 @@ exam_wrong_notes    id, user_id, question_id UNIQUE, is_dismissed, memo, added_a
 exam_scraps         id, user_id, question_id UNIQUE, memo, created_at
 exam_sessions       id, user_id, mode, subject, exam_id, total_count, correct_count, skipped_count, duration
 exam_settings       id, user_id, auto_remove_wrong
+exam_reports        id, user_id, question_id UNIQUE(user_id,question_id), created_at
 ```
 
 ---
@@ -105,62 +106,75 @@ exam_settings       id, user_id, auto_remove_wrong
 
 - 저장 위치: `backend/images/q_{question_id}.jpg`
 - DB 컬럼: `question_image` — 절대경로 문자열
-- 서빙: `GET /questions/{id}/image`
+- 서빙: `GET /api/questions/{id}/image`
 - `edit_router.py`의 `_resolve_path()` 헬퍼가 구형 Windows 백슬래시 경로도 처리
+
+---
+
+## API 라우팅 구조
+
+- **모든 API 엔드포인트는 `/api` 접두어** — `api_router = APIRouter()`로 묶어 `app.include_router(api_router, prefix="/api")`
+- upload_router, edit_router도 `/api/upload`, `/api/questions`로 마운트
+- 프론트 `src/api.js`의 기본 base URL: `/api`
+- SPA 캐치올(`/{full_path:path}`)은 `@app.get`으로 별도 등록 — API 라우터와 분리되어 페이지 새로고침 정상 작동
 
 ---
 
 ## 엔드포인트
 
-### main.py
+### main.py (`/api`)
 
 | 엔드포인트 | 설명 |
 |-----------|------|
-| `POST /auth/signup` | 회원가입 |
-| `POST /auth/login` | 로그인 → access_token + refresh_token |
-| `POST /auth/refresh` | 토큰 갱신 |
-| `POST /auth/forgot-password` | 비밀번호 재설정 메일 |
-| `POST /auth/update-password` | 비밀번호 변경 |
-| `GET /auth/me` | 현재 유저 정보 |
-| `GET /subjects` | 과목별 문제 수 |
-| `GET /questions` | 문제 목록 (exam_id 필터) |
-| `GET /questions/random` | 랜덤 문제 (count, subject, source, exam_ids) |
-| `GET /questions/exam-mode` | 시험 모드용 문제 (과목 목록, random/by_exam) |
-| `GET /questions/by_ids` | ID 배열로 문제 조회 |
-| `GET /questions/deeplink` | 딥링크용 단일 문제 |
-| `GET /questions/{id}` | 단일 문제 |
-| `POST /solve` | 답안 제출 → 정답 확인, 오답노트 처리 |
-| `GET /wrong-notes` | 오답노트 목록 |
-| `DELETE /wrong-notes/{question_id}` | 오답노트 제거 |
-| `PUT /wrong-notes/{question_id}/memo` | 오답노트 메모 수정 |
-| `GET /scraps` | 스크랩 목록 |
-| `POST /scraps/{question_id}` | 스크랩 추가 |
-| `DELETE /scraps/{question_id}` | 스크랩 삭제 |
-| `GET/PUT /settings` | 설정 조회/수정 |
-| `GET /exams` | 시험 목록 |
-| `DELETE /exams/{exam_id}` | 시험 삭제 |
-| `POST /sessions` | 세션 시작 |
-| `PUT /sessions/{id}/end` | 세션 종료 |
-| `GET /stats/counts` | 문제 수 카운트 (홈 로딩용, ~200ms) |
-| `GET /stats/overview` | 통계 (전체, 과목별, 날짜별) |
+| `POST /api/auth/signup` | 회원가입 |
+| `POST /api/auth/login` | 로그인 → access_token + refresh_token |
+| `POST /api/auth/refresh` | 토큰 갱신 |
+| `POST /api/auth/forgot-password` | 비밀번호 재설정 메일 |
+| `POST /api/auth/update-password` | 비밀번호 변경 |
+| `GET /api/auth/me` | 현재 유저 정보 |
+| `GET /api/subjects` | 과목별 문제 수 |
+| `GET /api/questions` | 문제 목록 (exam_id 필터) |
+| `GET /api/questions/random` | 랜덤 문제 (count, subject, source, exam_ids) |
+| `GET /api/questions/exam-mode` | 시험 모드용 문제 (과목 목록, random/by_exam) |
+| `GET /api/questions/by_ids` | ID 배열로 문제 조회 |
+| `GET /api/questions/deeplink` | 딥링크용 단일 문제 |
+| `GET /api/questions/{id}` | 단일 문제 |
+| `POST /api/solve` | 답안 제출 → 정답 확인, 오답노트 처리 |
+| `GET /api/wrong-notes` | 오답노트 목록 |
+| `DELETE /api/wrong-notes/{question_id}` | 오답노트 제거 |
+| `PUT /api/wrong-notes/{question_id}/memo` | 오답노트 메모 수정 |
+| `GET /api/scraps` | 스크랩 목록 |
+| `POST /api/scraps/{question_id}` | 스크랩 추가 |
+| `DELETE /api/scraps/{question_id}` | 스크랩 삭제 |
+| `POST /api/reports/{question_id}` | 문제 신고 |
+| `DELETE /api/reports/{question_id}` | 신고 취소 |
+| `GET /api/reports` | 전체 신고 목록 (관리자용) |
+| `GET/PUT /api/settings` | 설정 조회/수정 |
+| `GET /api/exams` | 시험 목록 |
+| `DELETE /api/exams/{exam_id}` | 시험 삭제 |
+| `POST /api/sessions` | 세션 시작 |
+| `PUT /api/sessions/{id}/end` | 세션 종료 |
+| `GET /api/stats/counts` | 문제 수 카운트 (홈 로딩용) |
+| `GET /api/stats/overview` | 통계 (전체, 과목별, 날짜별) |
+| `GET /api/stats/wrong-counts` | 많이 틀린 문제 목록 (limit=30) |
 
-### upload_router.py (`/upload`)
-
-| 엔드포인트 | 설명 |
-|-----------|------|
-| `POST /upload/analyze` | PDF 업로드 → 파일명 파싱 → 중복 검사 → 임시 저장 |
-| `POST /upload/confirm` | 파싱 시작 (백그라운드 스레드) |
-| `POST /upload/json` | JSON 직접 임포트 |
-| `GET /upload/logs` | 업로드 로그 최근 100건 |
-
-### edit_router.py (`/questions`)
+### upload_router.py (`/api/upload`)
 
 | 엔드포인트 | 설명 |
 |-----------|------|
-| `POST /questions/{id}/image` | 이미지 업로드 |
-| `GET /questions/{id}/image` | 이미지 서빙 |
-| `DELETE /questions/{id}/image` | 이미지 삭제 |
-| `PUT /questions/{id}` | 문제 텍스트/선지/해설 수정 |
+| `POST /api/upload/analyze` | PDF 업로드 → 파일명 파싱 → 중복 검사 → 임시 저장 |
+| `POST /api/upload/confirm` | 파싱 시작 (백그라운드 스레드) |
+| `POST /api/upload/json` | JSON 직접 임포트 |
+| `GET /api/upload/logs` | 업로드 로그 최근 100건 |
+
+### edit_router.py (`/api/questions`)
+
+| 엔드포인트 | 설명 |
+|-----------|------|
+| `POST /api/questions/{id}/image` | 이미지 업로드 |
+| `GET /api/questions/{id}/image` | 이미지 서빙 |
+| `DELETE /api/questions/{id}/image` | 이미지 삭제 |
+| `PUT /api/questions/{id}` | 문제 텍스트/선지/해설 수정 |
 
 ---
 
@@ -174,23 +188,30 @@ exam_settings       id, user_id, auto_remove_wrong
 | `/quiz` | Quiz | 문제 풀기 (랜덤/오답/스크랩/시험 모드) |
 | `/wrong-notes` | WrongNotes | 오답노트 목록 + 메모 |
 | `/scraps` | Scraps | 스크랩 목록 |
-| `/stats` | Stats | 통계 |
-| `/upload` | UploadPage | PDF 업로드 + JSON 가져오기 |
-| `/logs` | LogsPage | 업로드 진행 상태 |
+| `/stats` | Stats | 통계 + 많이 틀린 문제 |
+| `/admin` | Admin | 관리자 페이지 (비밀번호 게이트) — 업로드/로그/회차관리/신고 탭 |
 | `/edit/:question_id` | EditQuestion | 문제/이미지 수정 |
 | `/settings` | Settings | auto_remove_wrong 설정 |
+| `/upload`, `/logs` | — | `/admin`으로 리다이렉트 |
 
+메뉴: 홈 / 오답노트 / 스크랩 / 통계 / 설정 / 🔐 관리자  
 CSS 변수: `--bg`, `--bg2`, `--bg3`, `--border`, `--text`, `--text2`, `--accent`, `--correct`, `--wrong`, `--scrap`  
 PC(768px+): `body { zoom: 1.25 }`
+
+### 관리자 페이지 (`/admin`)
+
+- `Admin.jsx` 상단 `ADMIN_PW` 상수로 비밀번호 변경 (기본값 `'1234'`)
+- sessionStorage `_adm` 키로 세션 내 잠금 유지
+- 신고 목록: 모든 유저의 신고 표시, 편집/해제 버튼 제공
 
 ---
 
 ## PDF 업로드 흐름
 
 ```
-1. /upload/analyze  — 파일명 파싱, 중복 검사, 임시 저장 (backend/pdfs/temp/)
+1. /api/upload/analyze  — 파일명 파싱, 중복 검사, 임시 저장 (backend/pdfs/temp/)
 2. 사용자 메타데이터 확인
-3. /upload/confirm  — 백그라운드 파싱 시작
+3. /api/upload/confirm  — 백그라운드 파싱 시작
 4. background_parse()
    ├─ Gemini: 순차 처리, 15초 간격, 지수 백오프 재시도
    ├─ Claude: 병렬 스레드, PDF→페이지별 PNG(2x)→base64
@@ -207,5 +228,7 @@ AI 파서가 공통지문 문제를 `(N번 공통지문 문제)` 형태로 마�
 ## 기타
 
 - 학습자료: 별도 앱으로 분리됨 — 이 앱에 없음
-- 홈 성능: 전체 문제 fetch 대신 `/stats/counts` count only 사용
-- 선지 선택: 클라이언트 즉시 판정 후 `/solve` 백그라운드 전송
+- 홈 성능: 전체 문제 fetch 대신 `/api/stats/counts` count only 사용
+- 선지 선택: 클라이언트 즉시 판정 후 `/api/solve` 백그라운드 전송
+- 문제 풀기: 다음 문제 이동 및 로딩 완료 시 `window.scrollTo(0, 0)` 적용
+- Quiz 신고 버튼: 🚩 버튼 → `POST /api/reports/{id}`, 중복 신고 무시

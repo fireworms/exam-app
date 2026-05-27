@@ -3,11 +3,11 @@ import { clearToken } from '../api'
 
 const links = [
   { to: '/', label: '홈', icon: '⌂', end: true },
-  { to: '/quiz', label: '문제풀기', icon: '✎' },
   { to: '/wrong-notes', label: '오답노트', icon: '✗' },
   { to: '/scraps', label: '스크랩', icon: '★' },
-{ to: '/stats', label: '통계', icon: '📊' },
+  { to: '/stats', label: '통계', icon: '📊' },
   { to: '/settings', label: '설정', icon: '⚙' },
+  { to: '/admin', label: '관리자', icon: '🔐' },
 ]
 
 export default function Layout() {

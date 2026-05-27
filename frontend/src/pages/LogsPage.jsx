@@ -9,7 +9,7 @@ const STATUS_MAP = {
   failed:     { label: "실패",      color: "#dc2626", bg: "#fff5f5" },
 };
 
-function UploadLogs() {
+export function UploadLogs() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -93,7 +93,7 @@ function UploadLogs() {
   );
 }
 
-function ExamManager() {
+export function ExamManager() {
   const [exams, setExams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmId, setConfirmId] = useState(null);

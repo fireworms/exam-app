@@ -326,7 +326,7 @@ export default function UploadPage() {
               백그라운드에서 처리 중이에요. 업로드 로그에서 진행 상황을 확인하세요.
             </div>
           </div>
-          <button style={styles.logBtn} onClick={() => window.location.href = "/logs"}>
+          <button style={styles.logBtn} onClick={() => window.location.href = "/admin"}>
             로그 보기 →
           </button>
         </div>

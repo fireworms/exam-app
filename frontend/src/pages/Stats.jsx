@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import axios from '../axios'
-
 import API from '../api'
 
 function formatDuration(seconds) {
@@ -60,15 +60,20 @@ function SessionRow({ session }) {
 }
 
 export default function Stats() {
+  const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [selectedDate, setSelectedDate] = useState(null)
+  const [wrongCounts, setWrongCounts] = useState([])
 
   useEffect(() => {
     axios.get(`${API}/stats/overview`)
       .then(r => setData(r.data))
       .catch(console.error)
       .finally(() => setLoading(false))
+    axios.get(`${API}/stats/wrong-counts`)
+      .then(r => setWrongCounts(r.data))
+      .catch(console.error)
   }, [])
 
   if (loading) return <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text2)' }}>불러오는 중...</div>
@@ -296,6 +301,57 @@ export default function Stats() {
           <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
           <div>아직 풀이 기록이 없어요. 문제를 풀어보세요!</div>
         </div>
+      )}
+
+      {/* 많이 틀린 문제 */}
+      {wrongCounts.length > 0 && (
+        <>
+          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: 'var(--text2)' }}>많이 틀린 문제</h2>
+          <div style={{
+            border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+            background: 'var(--bg2)', marginBottom: 40, overflow: 'hidden',
+          }}>
+            <div style={{
+              display: 'grid', gridTemplateColumns: '40px 1fr 80px 60px',
+              padding: '10px 16px', background: 'var(--bg3)',
+              borderBottom: '1px solid var(--border)',
+              fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', gap: 8,
+            }}>
+              <span style={{ textAlign: 'center' }}>#</span>
+              <span>문제</span>
+              <span style={{ textAlign: 'center' }}>틀린 횟수</span>
+              <span></span>
+            </div>
+            {wrongCounts.map((q, i) => (
+              <div key={q.id} style={{
+                display: 'grid', gridTemplateColumns: '40px 1fr 80px 60px',
+                padding: '12px 16px', borderBottom: '1px solid var(--border)',
+                fontSize: 13, alignItems: 'center', gap: 8,
+              }}>
+                <span style={{ textAlign: 'center', fontWeight: 700, color: 'var(--text2)', fontSize: 12 }}>{i + 1}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 2 }}>
+                    {q.subject} · {q.year}년 {q.month}월 · Q{q.number}
+                  </div>
+                  <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>
+                    {q.question_text?.slice(0, 60)}{q.question_text?.length > 60 ? '…' : ''}
+                  </div>
+                </div>
+                <span style={{
+                  textAlign: 'center', fontWeight: 700, fontFamily: 'JetBrains Mono',
+                  color: q.wrong_count >= 5 ? 'var(--wrong)' : q.wrong_count >= 3 ? 'var(--scrap)' : 'var(--text)',
+                }}>
+                  {q.wrong_count}회
+                </span>
+                <button onClick={() => navigate(`/edit/${q.id}`)} style={{
+                  background: 'var(--bg3)', border: '1px solid var(--border)',
+                  borderRadius: 6, padding: '4px 10px', fontSize: 12,
+                  color: 'var(--text2)', cursor: 'pointer',
+                }}>편집</button>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   )

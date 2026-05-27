@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -30,9 +30,10 @@ from edit_router import router as edit_router
 os.makedirs(os.path.join(BASE_DIR, "images"), exist_ok=True)
 
 app = FastAPI()
+api_router = APIRouter()
 
-app.include_router(upload_router)
-app.include_router(edit_router)
+app.include_router(upload_router, prefix="/api")
+app.include_router(edit_router, prefix="/api")
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,7 +69,7 @@ def validate_password(password: str):
         raise HTTPException(status_code=400, detail="비밀번호에 숫자가 포함되어야 해요")
 
 
-@app.post("/auth/signup")
+@api_router.post("/auth/signup")
 def signup(req: AuthRequest):
     validate_password(req.password)
     sb = _new_auth_client()
@@ -86,7 +87,7 @@ def signup(req: AuthRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/auth/login")
+@api_router.post("/auth/login")
 def login(req: AuthRequest):
     sb = _new_auth_client()
     try:
@@ -108,7 +109,7 @@ def login(req: AuthRequest):
         raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 틀렸어요")
 
 
-@app.post("/auth/refresh")
+@api_router.post("/auth/refresh")
 def refresh_token(req: RefreshRequest):
     sb = _new_auth_client()
     try:
@@ -125,7 +126,7 @@ def refresh_token(req: RefreshRequest):
         raise HTTPException(status_code=401, detail="세션 갱신 실패")
 
 
-@app.post("/auth/forgot-password")
+@api_router.post("/auth/forgot-password")
 def forgot_password(req: ForgotPasswordRequest):
     sb = get_supabase()
     try:
@@ -138,7 +139,7 @@ def forgot_password(req: ForgotPasswordRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/auth/update-password")
+@api_router.post("/auth/update-password")
 def update_password(req: UpdatePasswordRequest, user_id: str = Depends(get_current_user)):
     validate_password(req.password)
     sb = get_supabase()
@@ -149,7 +150,7 @@ def update_password(req: UpdatePasswordRequest, user_id: str = Depends(get_curre
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/auth/me")
+@api_router.get("/auth/me")
 def me(user_id: str = Depends(get_current_user)):
     return {"user_id": user_id}
 
@@ -175,7 +176,7 @@ def fetch_questions_by_ids(sb, ids: list) -> list:
 
 # ─── 과목 ────────────────────────────────────────────
 
-@app.get("/subjects")
+@api_router.get("/subjects")
 def get_subjects(user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     res = sb.table("exam_questions").select("id, exam_exams!inner(subject)").execute()
@@ -189,7 +190,7 @@ def get_subjects(user_id: str = Depends(get_current_user)):
 
 # ─── 문제 ────────────────────────────────────────────
 
-@app.get("/questions/random")
+@api_router.get("/questions/random")
 def get_random_questions(
     count: int = 20,
     subject: Optional[str] = None,
@@ -226,7 +227,7 @@ def get_random_questions(
     return fetch_questions_by_ids(sb, selected)
 
 
-@app.get("/questions/exam-mode")
+@api_router.get("/questions/exam-mode")
 def get_exam_mode_questions(
     subjects: str,
     question_mode: str = "random",
@@ -267,13 +268,13 @@ def get_exam_mode_questions(
     return all_questions
 
 
-@app.get("/questions/by_ids")
+@api_router.get("/questions/by_ids")
 def get_questions_by_ids(ids: str, user_id: str = Depends(get_current_user)):
     id_list = [int(i) for i in ids.split(",") if i.strip().isdigit()]
     return fetch_questions_by_ids(get_supabase(), id_list)
 
 
-@app.get("/questions/deeplink")
+@api_router.get("/questions/deeplink")
 def get_question_by_deeplink(
     year: int,
     exam_type: str,
@@ -294,7 +295,7 @@ def get_question_by_deeplink(
     return flatten_question(q_res.data[0])
 
 
-@app.get("/questions/{question_id}")
+@api_router.get("/questions/{question_id}")
 def get_question(question_id: int, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     res = sb.table("exam_questions").select(
@@ -305,7 +306,7 @@ def get_question(question_id: int, user_id: str = Depends(get_current_user)):
     return flatten_question(res.data[0])
 
 
-@app.get("/questions")
+@api_router.get("/questions")
 def get_questions(
     exam_id: Optional[int] = None,
     subject: Optional[str] = None,
@@ -332,7 +333,7 @@ class SolveRequest(BaseModel):
     session_id: Optional[int] = None
 
 
-@app.post("/solve")
+@api_router.post("/solve")
 def submit_solve(req: SolveRequest, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
 
@@ -366,7 +367,7 @@ def submit_solve(req: SolveRequest, user_id: str = Depends(get_current_user)):
 
 # ─── 오답노트 ─────────────────────────────────────────
 
-@app.get("/wrong-notes")
+@api_router.get("/wrong-notes")
 def get_wrong_notes(user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     wn_res = sb.table("exam_wrong_notes").select("question_id, added_at, memo").eq("user_id", user_id).eq("is_dismissed", 0).order("added_at", desc=True).execute()
@@ -381,7 +382,7 @@ def get_wrong_notes(user_id: str = Depends(get_current_user)):
     return questions
 
 
-@app.delete("/wrong-notes/{question_id}")
+@api_router.delete("/wrong-notes/{question_id}")
 def remove_wrong_note(question_id: int, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     sb.table("exam_wrong_notes").update({"is_dismissed": 1}).eq("user_id", user_id).eq("question_id", question_id).execute()
@@ -392,7 +393,7 @@ class WrongNoteMemoRequest(BaseModel):
     memo: str = ""
 
 
-@app.put("/wrong-notes/{question_id}/memo")
+@api_router.put("/wrong-notes/{question_id}/memo")
 def update_wrong_note_memo(question_id: int, req: WrongNoteMemoRequest, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     sb.table("exam_wrong_notes").update({"memo": req.memo}).eq("user_id", user_id).eq("question_id", question_id).execute()
@@ -405,7 +406,7 @@ class ScrapRequest(BaseModel):
     memo: Optional[str] = ""
 
 
-@app.get("/scraps")
+@api_router.get("/scraps")
 def get_scraps(user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     sc_res = sb.table("exam_scraps").select("question_id, memo, created_at").eq("user_id", user_id).order("created_at", desc=True).execute()
@@ -420,7 +421,7 @@ def get_scraps(user_id: str = Depends(get_current_user)):
     return questions
 
 
-@app.post("/scraps/{question_id}")
+@api_router.post("/scraps/{question_id}")
 def add_scrap(question_id: int, req: ScrapRequest, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     existing = sb.table("exam_scraps").select("id").eq("user_id", user_id).eq("question_id", question_id).execute()
@@ -431,11 +432,49 @@ def add_scrap(question_id: int, req: ScrapRequest, user_id: str = Depends(get_cu
     return {"success": True}
 
 
-@app.delete("/scraps/{question_id}")
+@api_router.delete("/scraps/{question_id}")
 def remove_scrap(question_id: int, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     sb.table("exam_scraps").delete().eq("user_id", user_id).eq("question_id", question_id).execute()
     return {"success": True}
+
+
+# ─── 신고 ────────────────────────────────────────────
+
+@api_router.post("/reports/{question_id}")
+def add_report(question_id: int, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    existing = sb.table("exam_reports").select("id").eq("user_id", user_id).eq("question_id", question_id).execute()
+    if not existing.data:
+        sb.table("exam_reports").insert({"user_id": user_id, "question_id": question_id}).execute()
+    return {"success": True}
+
+
+@api_router.delete("/reports/{question_id}")
+def remove_report(question_id: int, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    sb.table("exam_reports").delete().eq("user_id", user_id).eq("question_id", question_id).execute()
+    return {"success": True}
+
+
+@api_router.get("/reports")
+def get_reports(user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    res = sb.table("exam_reports").select(
+        "id, user_id, question_id, created_at, exam_questions(number, question_text, exam_exams(year, month, subject))"
+    ).order("created_at", desc=True).execute()
+    rows = []
+    for r in res.data:
+        q = r.pop("exam_questions") or {}
+        exam = (q.pop("exam_exams", None) or {})
+        r["question_number"] = q.get("number")
+        r["question_text"] = (q.get("question_text") or "")[:80]
+        r["year"] = exam.get("year")
+        r["month"] = exam.get("month")
+        r["subject"] = exam.get("subject")
+        r["is_mine"] = r["user_id"] == user_id
+        rows.append(r)
+    return rows
 
 
 # ─── 설정 ────────────────────────────────────────────
@@ -444,7 +483,7 @@ class SettingsRequest(BaseModel):
     auto_remove_wrong: bool
 
 
-@app.get("/settings")
+@api_router.get("/settings")
 def get_settings(user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     res = sb.table("exam_settings").select("*").eq("user_id", user_id).execute()
@@ -454,7 +493,7 @@ def get_settings(user_id: str = Depends(get_current_user)):
     return res.data[0]
 
 
-@app.put("/settings")
+@api_router.put("/settings")
 def update_settings(req: SettingsRequest, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     sb.table("exam_settings").update({
@@ -466,7 +505,7 @@ def update_settings(req: SettingsRequest, user_id: str = Depends(get_current_use
 
 # ─── 시험 목록 ────────────────────────────────────────
 
-@app.get("/exams")
+@api_router.get("/exams")
 def get_exams(user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     exams_res = sb.table("exam_exams").select("*").order("year", desc=True).order("month", desc=True).order("day", desc=True).execute()
@@ -482,7 +521,7 @@ def get_exams(user_id: str = Depends(get_current_user)):
     return exams_res.data
 
 
-@app.delete("/exams/{exam_id}")
+@api_router.delete("/exams/{exam_id}")
 def delete_exam(exam_id: int, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     exam_res = sb.table("exam_exams").select("id").eq("id", exam_id).execute()
@@ -520,7 +559,7 @@ class SessionEndRequest(BaseModel):
     duration: int
 
 
-@app.post("/sessions")
+@api_router.post("/sessions")
 def start_session(req: SessionStartRequest, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     res = sb.table("exam_sessions").insert({
@@ -534,7 +573,7 @@ def start_session(req: SessionStartRequest, user_id: str = Depends(get_current_u
     return {"session_id": session_id}
 
 
-@app.put("/sessions/{session_id}/end")
+@api_router.put("/sessions/{session_id}/end")
 def end_session(session_id: int, req: SessionEndRequest, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     sb.table("exam_sessions").update({
@@ -548,7 +587,25 @@ def end_session(session_id: int, req: SessionEndRequest, user_id: str = Depends(
 
 # ─── 통계 ────────────────────────────────────────────
 
-@app.get("/stats/counts")
+@api_router.get("/stats/wrong-counts")
+def get_wrong_counts(limit: int = 30, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    res = sb.table("exam_solve_history").select("question_id").eq("user_id", user_id).eq("is_correct", False).execute()
+    count_map = {}
+    for row in res.data:
+        qid = row["question_id"]
+        count_map[qid] = count_map.get(qid, 0) + 1
+    if not count_map:
+        return []
+    sorted_ids = sorted(count_map.keys(), key=lambda x: count_map[x], reverse=True)[:limit]
+    questions = fetch_questions_by_ids(sb, sorted_ids)
+    for q in questions:
+        q["wrong_count"] = count_map.get(q["id"], 0)
+    questions.sort(key=lambda q: q["wrong_count"], reverse=True)
+    return questions
+
+
+@api_router.get("/stats/counts")
 def get_stats_counts(user_id: str = Depends(get_current_user)):
     sb = get_supabase()
     total = sb.table("exam_questions").select("id", count="exact").execute().count or 0
@@ -557,7 +614,7 @@ def get_stats_counts(user_id: str = Depends(get_current_user)):
     return {"total": total, "wrong": wrong, "scrap": scrap}
 
 
-@app.get("/stats/overview")
+@api_router.get("/stats/overview")
 def get_stats_overview(user_id: str = Depends(get_current_user)):
     sb = get_supabase()
 
@@ -637,6 +694,10 @@ def get_stats_overview(user_id: str = Depends(get_current_user)):
         "by_date": by_date,
     }
 
+
+# ─── API 라우터 등록 ─────────────────────────────────
+
+app.include_router(api_router, prefix="/api")
 
 # ─── 정적 파일 서빙 ──────────────────────────────────
 

@@ -75,6 +75,10 @@ export default function Quiz() {
     return () => clearInterval(timerRef.current)
   }, [timerActive, isExamMode])
 
+  useEffect(() => {
+    if (!loading) window.scrollTo(0, 0)
+  }, [loading])
+
   // 키보드 단축키
   useEffect(() => {
     const handler = (e) => {
@@ -250,6 +254,7 @@ export default function Quiz() {
       setSelected(null)
       setResult(null)
       setShowExplanation(false)
+      window.scrollTo(0, 0)
     }
   }
 
@@ -264,6 +269,7 @@ export default function Quiz() {
     if (current + 1 < questions.length) {
       setCurrent(prev => prev + 1)
       setSelected(answers[questions[current + 1]?.id] ?? null)
+      window.scrollTo(0, 0)
     }
   }
 
@@ -271,6 +277,7 @@ export default function Quiz() {
     if (current > 0) {
       setCurrent(prev => prev - 1)
       setSelected(answers[questions[current - 1]?.id] ?? null)
+      window.scrollTo(0, 0)
     }
   }
 
@@ -495,6 +502,13 @@ export default function Quiz() {
             border: '1px solid var(--border)', transition: 'all 0.15s'
           }}>
             {isScraped ? '★' : '☆'}
+          </button>
+          <button onClick={async () => {
+            await axios.post(`${API}/reports/${q.id}`)
+            alert('신고했어요.')
+          }} style={{ background: 'var(--bg3)', color: 'var(--text2)', padding: '6px 10px', borderRadius: 6, fontSize: 13, border: '1px solid var(--border)' }}
+            title="문제 오류 신고">
+            🚩
           </button>
         </div>
       </div>

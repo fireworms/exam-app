@@ -58,10 +58,12 @@ instance.interceptors.response.use(
       processQueue(null, access_token)
       original.headers.Authorization = `Bearer ${access_token}`
       return instance(original)
-    } catch {
+    } catch (refreshErr) {
       processQueue(new Error('refresh failed'))
-      clearToken()
-      window.location.href = '/login'
+      if (refreshErr.response?.status === 401) {
+        clearToken()
+        window.location.href = '/login'
+      }
       return Promise.reject(err)
     } finally {
       isRefreshing = false

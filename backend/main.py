@@ -122,8 +122,11 @@ def refresh_token(req: RefreshRequest):
         }
     except HTTPException:
         raise
-    except Exception:
-        raise HTTPException(status_code=401, detail="세션 갱신 실패")
+    except Exception as e:
+        msg = str(e).lower()
+        if "invalid" in msg or "expired" in msg or "not found" in msg:
+            raise HTTPException(status_code=401, detail="세션 갱신 실패")
+        raise HTTPException(status_code=503, detail="인증 서버 연결 실패")
 
 
 @api_router.post("/auth/forgot-password")
@@ -224,7 +227,9 @@ def get_random_questions(
         return []
 
     selected = random.sample(all_ids, min(count, len(all_ids)))
-    return fetch_questions_by_ids(sb, selected)
+    questions = fetch_questions_by_ids(sb, selected)
+    random.shuffle(questions)
+    return questions
 
 
 @api_router.get("/questions/exam-mode")

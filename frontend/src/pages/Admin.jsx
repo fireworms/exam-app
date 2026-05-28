@@ -1,16 +1,18 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import UploadPage from './UploadPage'
 import { UploadLogs, ExamManager } from './LogsPage'
+import { EditQuestionContent } from './EditQuestion'
 import axios from '../axios'
 import API from '../api'
 
 const ADMIN_PW = '1234' // 변경하세요
 
 function ReportsList() {
-  const navigate = useNavigate()
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
+  const [selectedQId, setSelectedQId] = useState(null)
+  const dirtyRef = useRef(false)
 
   const load = async () => {
     try {
@@ -28,6 +30,14 @@ function ReportsList() {
   const dismiss = async (questionId) => {
     await axios.delete(`${API}/reports/${questionId}`)
     setReports(prev => prev.filter(r => r.question_id !== questionId))
+    if (selectedQId === questionId) setSelectedQId(null)
+  }
+
+  const trySelectQ = (id) => {
+    if (selectedQId === id) { setSelectedQId(null); return }
+    if (dirtyRef.current && !window.confirm('저장하지 않은 변경사항이 있어요. 이동할까요?')) return
+    dirtyRef.current = false
+    setSelectedQId(id)
   }
 
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>불러오는 중...</div>
@@ -47,7 +57,8 @@ function ReportsList() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {reports.map(r => (
           <div key={r.id} style={{
-            background: 'var(--bg2)', border: '1px solid var(--border)',
+            background: 'var(--bg2)',
+            border: `1px solid ${selectedQId === r.question_id ? 'var(--accent)' : 'var(--border)'}`,
             borderRadius: 10, padding: '14px 18px',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12
           }}>
@@ -64,12 +75,132 @@ function ReportsList() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-              <button onClick={() => navigate(`/edit/${r.question_id}`)} style={btnStyle}>편집</button>
+              <button
+                onClick={() => trySelectQ(r.question_id)}
+                style={{ ...btnStyle, ...(selectedQId === r.question_id ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }}
+              >
+                {selectedQId === r.question_id ? '편집 닫기' : '편집'}
+              </button>
               <button onClick={() => dismiss(r.question_id)} style={{ ...btnStyle, color: 'var(--wrong)', borderColor: 'var(--wrong)' }}>해제</button>
             </div>
           </div>
         ))}
       </div>
+
+      {selectedQId && (
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 24, marginTop: 16 }}>
+          <EditQuestionContent
+            questionId={selectedQId}
+            onClose={() => { dirtyRef.current = false; setSelectedQId(null) }}
+            onDirtyChange={v => { dirtyRef.current = v }}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function QuestionBrowser() {
+  const [subjects, setSubjects] = useState([])
+  const [allExams, setAllExams] = useState([])
+  const [questions, setQuestions] = useState([])
+  const [selectedSubject, setSelectedSubject] = useState('')
+  const [selectedExamId, setSelectedExamId] = useState('')
+  const [loadingQ, setLoadingQ] = useState(false)
+  const [selectedQId, setSelectedQId] = useState(null)
+  const dirtyRef = useRef(false)
+
+  useEffect(() => {
+    axios.get(`${API}/subjects`).then(({ data }) => setSubjects(data.map(s => s.subject)))
+    axios.get(`${API}/exams`).then(({ data }) => setAllExams(data))
+  }, [])
+
+  const filteredExams = selectedSubject
+    ? allExams.filter(e => e.subject === selectedSubject)
+    : []
+
+  useEffect(() => {
+    setSelectedExamId('')
+    setQuestions([])
+    setSelectedQId(null)
+  }, [selectedSubject])
+
+  useEffect(() => {
+    if (!selectedExamId) { setQuestions([]); setSelectedQId(null); return }
+    setLoadingQ(true)
+    axios.get(`${API}/questions?exam_id=${selectedExamId}`)
+      .then(({ data }) => setQuestions(data))
+      .finally(() => setLoadingQ(false))
+  }, [selectedExamId])
+
+  const trySelectQ = (id) => {
+    if (dirtyRef.current && !window.confirm('저장하지 않은 변경사항이 있어요. 이동할까요?')) return
+    dirtyRef.current = false
+    setSelectedQId(id)
+  }
+
+  const selStyle = {
+    background: 'var(--bg2)', border: '1px solid var(--border)',
+    borderRadius: 8, padding: '8px 12px', fontSize: 14,
+    color: 'var(--text)', width: '100%', outline: 'none',
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>과목</div>
+          <select value={selectedSubject} onChange={e => setSelectedSubject(e.target.value)} style={selStyle}>
+            <option value="">선택</option>
+            {subjects.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div style={{ flex: 2 }}>
+          <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>회차</div>
+          <select value={selectedExamId} onChange={e => setSelectedExamId(e.target.value)} style={selStyle} disabled={!selectedSubject}>
+            <option value="">선택</option>
+            {filteredExams.map(e => (
+              <option key={e.id} value={e.id}>
+                {e.year}년 {e.month}월{e.day ? ` ${e.day}일` : ''}{e.grade ? ` ${e.grade}` : ''}{e.region ? ` ${e.region}` : ''} ({e.question_count}문제)
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {loadingQ && <div style={{ color: 'var(--text2)', fontSize: 14 }}>불러오는 중...</div>}
+
+      {questions.length > 0 && (
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>문제 선택</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {questions.map(q => (
+              <button
+                key={q.id}
+                onClick={() => trySelectQ(q.id)}
+                style={{
+                  ...btnStyle,
+                  minWidth: 48, textAlign: 'center',
+                  padding: '6px 10px', fontSize: 13,
+                  ...(selectedQId === q.id ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}),
+                }}
+              >
+                {q.number}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {selectedQId && (
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 24, marginTop: 8 }}>
+          <EditQuestionContent
+            questionId={selectedQId}
+            onClose={() => { dirtyRef.current = false; setSelectedQId(null) }}
+            onDirtyChange={v => { dirtyRef.current = v }}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -78,14 +209,18 @@ const TABS = [
   { id: 'upload', label: '업로드' },
   { id: 'logs', label: '로그' },
   { id: 'exams', label: '회차 관리' },
+  { id: 'edit', label: '문제 편집' },
   { id: 'reports', label: '신고' },
 ]
 
 export default function Admin() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [unlocked, setUnlocked] = useState(() => sessionStorage.getItem('_adm') === '1')
   const [input, setInput] = useState('')
   const [err, setErr] = useState(false)
-  const [tab, setTab] = useState('upload')
+
+  const tab = searchParams.get('tab') || 'upload'
+  const setTab = (id) => setSearchParams({ tab: id })
 
   const tryUnlock = () => {
     if (input === ADMIN_PW) {
@@ -147,6 +282,7 @@ export default function Admin() {
       {tab === 'upload' && <UploadPage />}
       {tab === 'logs' && <UploadLogs />}
       {tab === 'exams' && <ExamManager />}
+      {tab === 'edit' && <QuestionBrowser />}
       {tab === 'reports' && <ReportsList />}
     </div>
   )

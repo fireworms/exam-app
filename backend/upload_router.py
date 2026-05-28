@@ -77,6 +77,15 @@ PARSE_PROMPT = """이 시험지를 분석해서 모든 문제를 파싱해주세
 지문/사료/표/코드 등 문제에 포함된 모든 내용은 생략 없이 전문을 포함해야 합니다.
 
 {
+  "exam": {
+    "year": 2025,
+    "month": 3,
+    "day": null,
+    "subject": "국어",
+    "grade": "9급",
+    "region": "",
+    "source_file": "2025년 3월 국어 9급"
+  },
   "questions": [
     {
       "number": 1,

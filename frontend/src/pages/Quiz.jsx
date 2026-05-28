@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import axios from '../axios'
 import API from '../api'
+import QuestionText from '../components/QuestionText'
 
 export default function Quiz() {
   const [searchParams] = useSearchParams()
@@ -533,8 +534,8 @@ export default function Quiz() {
         <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 12 }}>
           {q.subject} · {q.year}년 {q.month}월
         </div>
-        <div style={{ fontSize: 15, lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>
-          <strong>Q{q.number}.</strong> {q.question_text}
+        <div style={{ fontSize: 15, lineHeight: 1.8 }}>
+          <strong>Q{q.number}.</strong> <QuestionText text={q.question_text} />
         </div>
         {imageUrl && (
           <div style={{ marginTop: 16 }}>
@@ -594,9 +595,9 @@ export default function Quiz() {
             <div style={{
               background: 'var(--bg2)', border: '1px solid var(--border)',
               borderRadius: 8, padding: '18px', fontSize: 14, lineHeight: 1.8,
-              whiteSpace: 'pre-wrap', color: 'var(--text)',
+              color: 'var(--text)',
             }}>
-              {q.explanation}
+              <QuestionText text={q.explanation} />
             </div>
           )}
         </div>

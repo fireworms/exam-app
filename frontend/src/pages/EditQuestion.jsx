@@ -17,12 +17,7 @@ function getCroppedBlob(image, crop) {
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.95))
 }
 
-export default function EditQuestion() {
-  const { question_id } = useParams()
-  const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const returnTo = searchParams.get('return') || '/quiz'
-
+export function EditQuestionContent({ questionId, onClose, onDirtyChange }) {
   const [q, setQ] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -37,16 +32,18 @@ export default function EditQuestion() {
   const imgRef = useRef()
   const fileInputRef = useRef()
 
-  useEffect(() => { loadQuestion() }, [question_id])
+  useEffect(() => { loadQuestion() }, [questionId])
 
   const loadQuestion = async () => {
     setLoading(true)
+    setSaved(false)
+    onDirtyChange?.(false)
     try {
-      const res = await axios.get(`${API}/questions/${question_id}`)
+      const res = await axios.get(`${API}/questions/${questionId}`)
       setQ(res.data)
       try {
-        await axios.get(`${API}/questions/${question_id}/image`, { responseType: 'blob' })
-        setImageUrl(`${API}/questions/${question_id}/image?t=${Date.now()}`)
+        await axios.get(`${API}/questions/${questionId}/image`, { responseType: 'blob' })
+        setImageUrl(`${API}/questions/${questionId}/image?t=${Date.now()}`)
       } catch { setImageUrl(null) }
     } catch (e) { console.error(e) }
     setLoading(false)
@@ -76,8 +73,8 @@ export default function EditQuestion() {
       const blob = await getCroppedBlob(imgRef.current, completedCrop)
       const formData = new FormData()
       formData.append('file', blob, 'cropped.jpg')
-      await axios.post(`${API}/questions/${question_id}/image`, formData)
-      setImageUrl(`${API}/questions/${question_id}/image?t=${Date.now()}`)
+      await axios.post(`${API}/questions/${questionId}/image`, formData)
+      setImageUrl(`${API}/questions/${questionId}/image?t=${Date.now()}`)
       setCropMode(false)
       setCropSrc(null)
     } catch (e) { alert('업로드 실패: ' + e.message) }
@@ -89,30 +86,32 @@ export default function EditQuestion() {
   const handleImageDelete = async () => {
     if (!confirm('이미지를 삭제할까요?')) return
     try {
-      await axios.delete(`${API}/questions/${question_id}/image`)
+      await axios.delete(`${API}/questions/${questionId}/image`)
       setImageUrl(null)
     } catch (e) { alert('삭제 실패: ' + e.message) }
   }
 
-  const handleTextChange = (field, value) => { setQ(prev => ({ ...prev, [field]: value })); setSaved(false) }
+  const markDirty = () => { setSaved(false); onDirtyChange?.(true) }
+  const handleTextChange = (field, value) => { setQ(prev => ({ ...prev, [field]: value })); markDirty() }
   const handleChoiceChange = (idx, field, value) => {
     setQ(prev => ({ ...prev, choices: prev.choices.map((c, i) => i === idx ? { ...c, [field]: value } : c) }))
-    setSaved(false)
+    markDirty()
   }
   const handleCorrectChange = (idx) => {
     setQ(prev => ({ ...prev, choices: prev.choices.map((c, i) => ({ ...c, is_correct: i === idx })) }))
-    setSaved(false)
+    markDirty()
   }
 
   const handleSave = async () => {
     setSaving(true)
     try {
-      await axios.put(`${API}/questions/${question_id}`, {
+      await axios.put(`${API}/questions/${questionId}`, {
         question_text: q.question_text,
         explanation: q.explanation,
         choices: q.choices.map(c => ({ id: c.id, text: c.text, is_correct: !!c.is_correct }))
       })
       setSaved(true)
+      onDirtyChange?.(false)
     } catch (e) { alert('저장 실패: ' + e.message) }
     setSaving(false)
   }
@@ -121,12 +120,10 @@ export default function EditQuestion() {
   if (!q) return <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text2)' }}>문제를 찾을 수 없어요</div>
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto', paddingBottom: 60 }}>
-
-      {/* 헤더 */}
+    <div style={{ paddingBottom: 40 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 }}>
         <div>
-          <button onClick={() => navigate(returnTo)} style={styles.backBtn}>← 돌아가기</button>
+          {onClose && <button onClick={onClose} style={styles.backBtn}>← 목록으로</button>}
           <h2 style={{ margin: '8px 0 4px', fontSize: 20, fontWeight: 700 }}>문제 편집</h2>
           <div style={{ fontSize: 13, color: 'var(--text2)' }}>{q.subject} · {q.year}년 {q.month}월 · Q{q.number}</div>
         </div>
@@ -135,10 +132,8 @@ export default function EditQuestion() {
         </button>
       </div>
 
-      {/* 이미지 섹션 */}
       <div style={styles.section}>
         <div style={styles.sectionLabel}>문제 이미지</div>
-
         {cropMode && cropSrc ? (
           <div>
             <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 12 }}>
@@ -180,17 +175,14 @@ export default function EditQuestion() {
             )}
           </div>
         )}
-
         <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFileSelected(e.target.files[0])} />
       </div>
 
-      {/* 문제 텍스트 */}
       <div style={styles.section}>
         <div style={styles.sectionLabel}>문제</div>
-        <textarea value={q.question_text} onChange={e => handleTextChange('question_text', e.target.value)} style={{ ...styles.textarea, minHeight: 140 }} />
+        <textarea value={q.question_text} onChange={e => handleTextChange('question_text', e.target.value)} style={{ ...styles.textarea, minHeight: 280 }} />
       </div>
 
-      {/* 선지 */}
       <div style={styles.section}>
         <div style={styles.sectionLabel}>선지</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -199,7 +191,7 @@ export default function EditQuestion() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                 <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, color: choice.is_correct ? 'var(--correct)' : 'var(--text2)', minWidth: 20 }}>{choice.number}.</span>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text2)', cursor: 'pointer', marginLeft: 'auto' }}>
-                  <input type="radio" name="correct" checked={!!choice.is_correct} onChange={() => handleCorrectChange(idx)} />
+                  <input type="radio" name={`correct_${questionId}`} checked={!!choice.is_correct} onChange={() => handleCorrectChange(idx)} />
                   정답
                 </label>
               </div>
@@ -209,19 +201,30 @@ export default function EditQuestion() {
         </div>
       </div>
 
-      {/* 해설 */}
       <div style={styles.section}>
         <div style={styles.sectionLabel}>해설</div>
         <textarea value={q.explanation} onChange={e => handleTextChange('explanation', e.target.value)} style={{ ...styles.textarea, minHeight: 200 }} />
       </div>
 
-      {/* 하단 저장 */}
       <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-        <button onClick={() => navigate(returnTo)} style={styles.cancelBtn}>취소</button>
+        {onClose && <button onClick={onClose} style={styles.cancelBtn}>취소</button>}
         <button onClick={handleSave} disabled={saving} style={{ ...styles.saveBtn, ...(saved ? styles.saveBtnDone : {}) }}>
           {saving ? '저장 중...' : saved ? '✓ 저장됨' : '저장'}
         </button>
       </div>
+    </div>
+  )
+}
+
+export default function EditQuestion() {
+  const { question_id } = useParams()
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const returnTo = searchParams.get('return') || '/quiz'
+
+  return (
+    <div style={{ maxWidth: 720, margin: '0 auto', paddingBottom: 60 }}>
+      <EditQuestionContent questionId={question_id} onClose={() => navigate(returnTo)} />
     </div>
   )
 }

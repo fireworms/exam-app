@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from '../axios'
-
 import API from '../api'
+import QuestionText from '../components/QuestionText'
 
 function NoteCard({ q, onRemove }) {
   const [memo, setMemo] = useState(q.memo || '')
@@ -33,8 +33,8 @@ function NoteCard({ q, onRemove }) {
         </button>
       </div>
 
-      <div style={{ fontSize: 14, lineHeight: 1.7, marginBottom: 12, whiteSpace: 'pre-wrap' }}>
-        {q.question_text.length > 150 ? q.question_text.slice(0, 150) + '...' : q.question_text}
+      <div style={{ fontSize: 14, lineHeight: 1.7, marginBottom: 12 }}>
+        <QuestionText text={q.question_text} maxLength={150} />
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 14 }}>

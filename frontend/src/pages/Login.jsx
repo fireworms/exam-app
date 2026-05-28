@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import API, { setToken } from '../api'
+import API from '../api'
+import { supabase } from '../supabase'
 
 function getPasswordStrength(pw) {
   if (!pw) return null
@@ -38,22 +39,20 @@ export default function Login() {
     }
     setLoading(true)
     try {
-      const endpoint = mode === 'login' ? '/auth/login' : '/auth/signup'
-      const res = await fetch(`${API}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.detail || '오류가 발생했어요')
-        return
-      }
       if (mode === 'login') {
-        setToken(data.access_token, data.refresh_token)
-        localStorage.setItem('exam_user', data.email)
+        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        if (error) { setError(error.message || '로그인에 실패했어요'); return }
+        localStorage.setItem('exam_user', email)
         navigate('/')
       } else {
+        // 회원가입은 백엔드 경유 (비밀번호 형식 검증)
+        const res = await fetch(`${API}/auth/signup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        })
+        const data = await res.json()
+        if (!res.ok) { setError(data.detail || '오류가 발생했어요'); return }
         setMode('login')
         setPassword('')
         setConfirm('')

@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { clearToken } from '../api'
+import { supabase } from '../supabase'
 
 const links = [
   { to: '/', label: '홈', icon: '⌂', end: true },
@@ -12,8 +12,9 @@ const links = [
 
 export default function Layout() {
   const navigate = useNavigate()
-  function logout() {
-    clearToken()
+  async function logout() {
+    await supabase.auth.signOut()
+    localStorage.removeItem('exam_user')
     navigate('/login')
   }
 

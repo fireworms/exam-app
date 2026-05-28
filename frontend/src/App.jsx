@@ -10,7 +10,7 @@ import EditQuestion from './pages/EditQuestion'
 import Stats from './pages/Stats'
 import Login from './pages/Login'
 import ResetPassword from './pages/ResetPassword'
-import { getToken } from './api'
+import { supabase } from './supabase'
 import './index.css'
 
 function QuizWithKey() {
@@ -19,7 +19,9 @@ function QuizWithKey() {
 }
 
 function PrivateRoute({ children }) {
-  return getToken() ? children : <Navigate to="/login" replace />
+  // Supabase가 localStorage에 세션을 저장하므로 동기적으로 확인 가능
+  const stored = Object.keys(localStorage).some(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
+  return stored ? children : <Navigate to="/login" replace />
 }
 
 export default function App() {

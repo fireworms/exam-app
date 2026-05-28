@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from '../axios'
-
 import API from '../api'
 
 const EXAM_TEMPLATES = ['국어', '영어', '한국사', '컴퓨터일반', '정보보호론']

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import axios from '../axios'
 import API from '../api'
@@ -44,6 +44,13 @@ export default function Quiz() {
   const timerRef = React.useRef(null)
   const totalAnswerTimeRef = React.useRef(0)
   const correctCountRef = React.useRef(0) // stale closure 방지
+  // 단어장 모드
+  const [vocabMode, setVocabMode] = useState(false)
+  const [vocabFloating, setVocabFloating] = useState(null) // { text, x, y }
+  const [vocabModal, setVocabModal] = useState(null) // 분석 결과
+  const [vocabLoading, setVocabLoading] = useState(false)
+  const [vocabSaved, setVocabSaved] = useState(false)
+  const vocabAreaRef = useRef(null)
 
   useEffect(() => {
     loadQuestions()
@@ -342,6 +349,47 @@ export default function Quiz() {
     }
   }
 
+  // ── 단어장 ─────────────────────────────────────────
+
+  const handleVocabMouseUp = (e) => {
+    if (!vocabMode) return
+    const sel = window.getSelection()
+    const text = sel?.toString().trim()
+    if (!text || text.length < 1) {
+      setVocabFloating(null)
+      return
+    }
+    const rect = vocabAreaRef.current?.getBoundingClientRect()
+    const x = e.clientX - (rect?.left || 0)
+    const y = e.clientY - (rect?.top || 0)
+    setVocabFloating({ text, x, y })
+  }
+
+  const handleVocabRegister = async () => {
+    if (!vocabFloating) return
+    setVocabLoading(true)
+    setVocabModal(null)
+    try {
+      const res = await axios.post(`${API}/vocab/analyze`, { text: vocabFloating.text })
+      setVocabModal(res.data)
+    } catch (e) {
+      alert(e.response?.data?.detail || '분석 실패')
+    }
+    setVocabLoading(false)
+    setVocabFloating(null)
+  }
+
+  const handleVocabSave = async () => {
+    if (!vocabModal) return
+    try {
+      await axios.post(`${API}/vocab`, vocabModal)
+      setVocabSaved(true)
+      setTimeout(() => { setVocabModal(null); setVocabSaved(false) }, 1200)
+    } catch (e) {
+      alert(e.response?.data?.detail || '저장 실패')
+    }
+  }
+
   // ── 렌더 ──────────────────────────────────────────
 
   if (loading) return (
@@ -526,10 +574,14 @@ export default function Quiz() {
         </div>
       )}
 
+      {/* 문제 + 선지 — 단어장 드래그 영역 */}
+      <div ref={vocabAreaRef} style={{ position: 'relative' }} onMouseUp={handleVocabMouseUp}>
+
       {/* 문제 */}
       <div style={{
-        background: 'var(--bg2)', border: '1px solid var(--border)',
-        borderRadius: 'var(--radius)', padding: '24px', marginBottom: 20
+        background: 'var(--bg2)', border: `1px solid ${vocabMode ? 'var(--accent)' : 'var(--border)'}`,
+        borderRadius: 'var(--radius)', padding: '24px', marginBottom: 20,
+        userSelect: vocabMode ? 'text' : undefined,
       }}>
         <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 12 }}>
           {q.subject} · {q.year}년 {q.month}월
@@ -546,7 +598,7 @@ export default function Quiz() {
       </div>
 
       {/* 선지 */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20, userSelect: vocabMode ? 'text' : undefined }}>
         {q.choices.map(choice => {
           let bg = 'var(--bg2)', border = 'var(--border)', color = 'var(--text)'
           if (!isExamMode && result) {
@@ -572,6 +624,37 @@ export default function Quiz() {
         })}
       </div>
 
+      {/* 드래그 후 단어장 등록 플로팅 버튼 */}
+      {vocabMode && vocabFloating && (
+        <div style={{
+          position: 'absolute', left: vocabFloating.x, top: vocabFloating.y - 44,
+          zIndex: 200, display: 'flex', gap: 6,
+        }}>
+          <button
+            onMouseDown={e => e.preventDefault()}
+            onClick={handleVocabRegister}
+            style={{
+              background: 'var(--accent)', color: 'white',
+              padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+              border: 'none', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            📖 단어장 등록
+          </button>
+          <button
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => setVocabFloating(null)}
+            style={{
+              background: 'var(--bg3)', color: 'var(--text2)',
+              padding: '6px 10px', borderRadius: 8, fontSize: 13,
+              border: '1px solid var(--border)', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+            }}
+          >✕</button>
+        </div>
+      )}
+      </div>{/* end vocabAreaRef */}
+
       {/* 결과 & 해설 (일반 모드) */}
       {!isExamMode && result && (
         <div style={{ marginBottom: 20 }}>
@@ -584,13 +667,30 @@ export default function Quiz() {
           }}>
             {result.is_correct ? '✓ 정답!' : '✗ 오답'}
           </div>
-          <button onClick={() => setShowExplanation(p => !p)} style={{
-            background: 'var(--bg3)', border: '1px solid var(--border)',
-            borderRadius: 8, padding: '10px 16px', color: 'var(--text2)', fontSize: 13,
-            marginBottom: showExplanation ? 12 : 0,
-          }}>
-            {showExplanation ? '▲ 해설 닫기' : '▼ 해설 보기'}
-          </button>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+            <button onClick={() => setShowExplanation(p => !p)} style={{
+              background: 'var(--bg3)', border: '1px solid var(--border)',
+              borderRadius: 8, padding: '10px 16px', color: 'var(--text2)', fontSize: 13,
+            }}>
+              {showExplanation ? '▲ 해설 닫기' : '▼ 해설 보기'}
+            </button>
+            <button
+              onClick={() => { setVocabMode(p => !p); setVocabFloating(null) }}
+              style={{
+                background: vocabMode ? 'rgba(99,102,241,0.12)' : 'var(--bg3)',
+                border: `1px solid ${vocabMode ? 'var(--accent)' : 'var(--border)'}`,
+                borderRadius: 8, padding: '10px 16px',
+                color: vocabMode ? 'var(--accent)' : 'var(--text2)', fontSize: 13,
+              }}
+            >
+              📖 {vocabMode ? '단어장 모드 ON' : '단어장 모드'}
+            </button>
+            {vocabMode && (
+              <span style={{ fontSize: 12, color: 'var(--accent)', alignSelf: 'center' }}>
+                ← 텍스트를 드래그하세요
+              </span>
+            )}
+          </div>
           {showExplanation && (
             <div style={{
               background: 'var(--bg2)', border: '1px solid var(--border)',
@@ -600,6 +700,107 @@ export default function Quiz() {
               <QuestionText text={q.explanation} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* 단어장 분석 로딩 */}
+      {vocabLoading && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }}>
+          <div style={{
+            background: 'var(--bg2)', borderRadius: 12, padding: '32px 40px',
+            color: 'var(--text2)', fontSize: 15,
+          }}>
+            📖 단어 분석 중...
+          </div>
+        </div>
+      )}
+
+      {/* 단어장 분석 모달 */}
+      {vocabModal && !vocabLoading && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000, padding: '20px',
+        }}
+          onClick={e => { if (e.target === e.currentTarget) { setVocabModal(null); setVocabSaved(false) } }}
+        >
+          <div style={{
+            background: 'var(--bg2)', borderRadius: 12, padding: '28px',
+            maxWidth: 480, width: '100%', border: '1px solid var(--border)',
+            display: 'flex', flexDirection: 'column', gap: 16,
+          }}>
+            {vocabSaved ? (
+              <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--correct)', fontSize: 18, fontWeight: 700 }}>
+                ✓ 단어장에 저장됐어요
+              </div>
+            ) : (
+              <>
+                {/* 단어 헤더 */}
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 22, fontWeight: 700, fontFamily: 'JetBrains Mono' }}>{vocabModal.word}</span>
+                  {vocabModal.pos && (
+                    <span style={{ fontSize: 13, color: 'var(--accent)', background: 'rgba(99,102,241,0.1)', padding: '2px 8px', borderRadius: 5 }}>
+                      {vocabModal.pos}
+                    </span>
+                  )}
+                  {vocabModal.type === 'phrase' && (
+                    <span style={{ fontSize: 12, color: 'var(--text2)', background: 'var(--bg3)', padding: '2px 7px', borderRadius: 5 }}>숙어</span>
+                  )}
+                  {vocabModal.is_high_freq && (
+                    <span style={{ fontSize: 12, color: '#ca8a04', background: 'rgba(234,179,8,0.1)', padding: '2px 7px', borderRadius: 5 }}>★ 고빈도</span>
+                  )}
+                </div>
+
+                {/* 해석 */}
+                <div style={{ fontSize: 16, color: 'var(--text)' }}>{vocabModal.meaning}</div>
+
+                {/* 예문 */}
+                {vocabModal.example && (
+                  <div style={{ background: 'var(--bg3)', borderRadius: 8, padding: '12px 14px' }}>
+                    <div style={{ fontSize: 14, fontStyle: 'italic', lineHeight: 1.7 }}>{vocabModal.example}</div>
+                    {vocabModal.example_translation && (
+                      <div style={{ fontSize: 13, color: 'var(--text2)', marginTop: 6 }}>{vocabModal.example_translation}</div>
+                    )}
+                  </div>
+                )}
+
+                {/* 동의어 */}
+                {vocabModal.synonyms && vocabModal.synonyms.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>동의어</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {vocabModal.synonyms.map((s, i) => (
+                        <span key={i} style={{
+                          fontSize: 13, fontFamily: 'JetBrains Mono',
+                          background: 'var(--bg3)', border: '1px solid var(--border)',
+                          padding: '3px 10px', borderRadius: 6,
+                        }}>{s}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 버튼 */}
+                <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                  <button onClick={handleVocabSave} style={{
+                    flex: 1, background: 'var(--accent)', color: 'white',
+                    padding: '12px', borderRadius: 8, fontSize: 14, fontWeight: 600, border: 'none',
+                  }}>
+                    단어장에 저장
+                  </button>
+                  <button onClick={() => { setVocabModal(null); setVocabSaved(false) }} style={{
+                    padding: '12px 18px', borderRadius: 8, fontSize: 14,
+                    background: 'var(--bg3)', border: '1px solid var(--border)', color: 'var(--text2)',
+                  }}>
+                    취소
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
 

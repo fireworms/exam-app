@@ -26,6 +26,7 @@ def _new_auth_client():
     return _create_supabase_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_KEY"))
 from upload_router import router as upload_router
 from edit_router import router as edit_router
+from vocab_router import router as vocab_router
 
 os.makedirs(os.path.join(BASE_DIR, "images"), exist_ok=True)
 
@@ -34,6 +35,7 @@ api_router = APIRouter()
 
 app.include_router(upload_router, prefix="/api")
 app.include_router(edit_router, prefix="/api")
+app.include_router(vocab_router, prefix="/api")
 
 app.add_middleware(
     CORSMiddleware,

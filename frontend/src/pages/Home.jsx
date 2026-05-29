@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import axios from '../axios'
 import API from '../api'
 
@@ -115,6 +115,26 @@ export default function Home() {
           </button>
         ))}
       </div>
+
+      {/* 단어장 */}
+      <Link to="/vocab" style={{ display: 'block', marginBottom: 40, textDecoration: 'none' }}>
+        <div style={{
+          background: 'var(--bg2)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)', padding: '20px',
+          display: 'flex', alignItems: 'center', gap: 14,
+          transition: 'border-color 0.15s',
+        }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+          onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+        >
+          <span style={{ fontSize: 24 }}>📖</span>
+          <div>
+            <div style={{ fontWeight: 600, color: 'var(--text)' }}>단어장</div>
+            <div style={{ fontSize: 13, color: 'var(--text2)' }}>등록한 단어·숙어 복습</div>
+          </div>
+          <span style={{ marginLeft: 'auto', color: 'var(--accent)', fontSize: 18 }}>→</span>
+        </div>
+      </Link>
 
       {/* 시험 모드 */}
       <div style={{ marginBottom: 40 }}>

@@ -48,8 +48,11 @@ nohup uvicorn main:app --host 0.0.0.0 --port 8008 > /tmp/backend.log 2>&1 &
 | `backend/upload_router.py` | PDF/JSON 업로드 (`/api/upload`) |
 | `backend/edit_router.py` | 문제 편집/이미지 (`/api/questions`) |
 | `backend/vocab_router.py` | 단어장 (`/api/vocab`) |
-| `backend/images/` | 문제 이미지 파일 (`q_{id}.jpg`) |
-| `frontend/src/axios.js` | axios 인터셉터 (JWT 주입, refresh) |
+| `backend/images/` | 문제 이미지 로컬 캐시 (레거시, 실제 서빙은 Storage) |
+| `api/index.py` | Vercel 서버리스 진입점 (`backend.main:app` 로드) |
+| `pyproject.toml` | Vercel entrypoint 설정 (`[tool.vercel]`) |
+| `vercel.json` | Vercel 빌드·리라이트 설정 |
+| `frontend/src/axios.js` | axios 인터셉터 (JWT 주입, tokenReady 대기) |
 | `frontend/src/tts.js` | TTS 유틸 — `speak()`, `useSpeaking()` 훅 |
 | `frontend/src/pages/` | 페이지 컴포넌트 |
 
@@ -64,7 +67,7 @@ exam_exams          시험 메타데이터
   id, year, month, day, subject, grade, region, source_file
 
 exam_questions      문제
-  id, exam_id → exam_exams, number, question_text, question_image(절대경로 문자열), explanation
+  id, exam_id → exam_exams, number, question_text, question_image(Storage 공개 URL), explanation
 
 exam_choices        선지
   id, question_id → exam_questions, number, text, is_correct
@@ -90,10 +93,18 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 ## 인증 구조
 
 - 백엔드: `Authorization: Bearer <jwt>` 헤더 검증 (`auth.py`)
-- 프론트: axios 인터셉터 자동 주입, 401 시 refresh_token으로 갱신 후 재시도, 갱신 실패 시만 `/login` 리다이렉트
-- refresh_token: localStorage `exam_refresh_token`, 60일 만료 (사용 시 rotation)
+- 프론트: axios 인터셉터 — `tokenReady` Promise로 `getSession()` 완료 후 첫 요청 송신 (새로고침 race condition 방지), 401 시 `/login` 리다이렉트
+- refresh_token: Supabase `onAuthStateChange` 자동 갱신 (localStorage 저장)
 - 비밀번호: 8자+, 영문+숫자 필수 (백엔드 검증)
 - 비밀번호 재설정: `/reset-password` (URL 해시 access_token 파싱)
+
+### ⚠️ Vercel 배포 관련
+
+- **프로덕션 URL**: https://exam-app-two-nu.vercel.app
+- **재배포**: `cd /home/fireworms/exam-app && vercel --prod --yes` (반드시 루트에서 실행)
+- **환경변수**: Vercel 대시보드 또는 `vercel env add/rm` — `SUPABASE_SERVICE_KEY`는 Supabase 대시보드의 service_role **JWT** 키 사용 (`sb_secret_` 포맷 아님)
+- `api/index.py` + `pyproject.toml` — Vercel이 `backend.main:app` 로드. `upload_router`는 `VERCEL=1` 환경변수로 자동 제외
+- `backend/main.py` 상단 `sys.path.insert` — Vercel에서 sibling 모듈 임포트 보장
 
 ### ⚠️ Supabase 싱글톤 주의
 
@@ -242,6 +253,7 @@ AI 파서가 공통지문 문제를 `(N번 공통지문 문제)` 형태로 마�
 
 ## 기타
 
+- **인증 없을 때 응답**: `auth.py`에서 `Header(None)` 사용 — 헤더 없으면 422 아닌 401 반환
 - 학습자료: 별도 앱으로 분리됨 — 이 앱에 없음
 - 홈 성능: 전체 문제 fetch 대신 `/api/stats/counts` count only 사용
 - 선지 선택: 클라이언트 즉시 판정 후 `/api/solve` 백그라운드 전송

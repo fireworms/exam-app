@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import axios from '../axios'
 import API from '../api'
 import QuestionText from '../components/QuestionText'
+import { speak, useSpeaking } from '../tts'
 
 export default function Quiz() {
   const [searchParams] = useSearchParams()
@@ -44,13 +45,29 @@ export default function Quiz() {
   const timerRef = React.useRef(null)
   const totalAnswerTimeRef = React.useRef(0)
   const correctCountRef = React.useRef(0) // stale closure 방지
+  const speaking = useSpeaking()
   // 단어장 모드
   const [vocabMode, setVocabMode] = useState(false)
   const [vocabFloating, setVocabFloating] = useState(null) // { text, x, y }
   const [vocabModal, setVocabModal] = useState(null) // 분석 결과
   const [vocabLoading, setVocabLoading] = useState(false)
   const [vocabSaved, setVocabSaved] = useState(false)
+  const [vocabLoadingStep, setVocabLoadingStep] = useState(0)
   const vocabAreaRef = useRef(null)
+
+  const VOCAB_LOADING_MSGS = [
+    { icon: '🔍', text: '단어 분석 중...' },
+    { icon: '📚', text: '시험에 나올 뜻 찾는 중...' },
+    { icon: '✍️', text: '예문 만드는 중...' },
+    { icon: '🔗', text: '동의어 수배 중...' },
+    { icon: '🌱', text: '원형 추적 중...' },
+  ]
+
+  useEffect(() => {
+    if (!vocabLoading) { setVocabLoadingStep(0); return }
+    const id = setInterval(() => setVocabLoadingStep(s => (s + 1) % VOCAB_LOADING_MSGS.length), 900)
+    return () => clearInterval(id)
+  }, [vocabLoading])
 
   useEffect(() => {
     loadQuestions()
@@ -383,6 +400,7 @@ export default function Quiz() {
     if (!vocabModal) return
     try {
       await axios.post(`${API}/vocab`, vocabModal)
+      new BroadcastChannel('vocab_update').postMessage('added')
       setVocabSaved(true)
       setTimeout(() => { setVocabModal(null); setVocabSaved(false) }, 1200)
     } catch (e) {
@@ -588,6 +606,10 @@ export default function Quiz() {
         </div>
         <div style={{ fontSize: 15, lineHeight: 1.8 }}>
           <strong>Q{q.number}.</strong> <QuestionText text={q.question_text} />
+          <button onClick={() => speak(q.question_text)} style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontSize: 14, padding: '0 4px', color: 'var(--text2)', verticalAlign: 'middle',
+          }}>{speaking === q.question_text ? '🟥' : '🔊'}</button>
         </div>
         {imageUrl && (
           <div style={{ marginTop: 16 }}>
@@ -614,11 +636,16 @@ export default function Quiz() {
                 background: bg, border: `1px solid ${border}`, borderRadius: 8,
                 padding: '14px 18px', textAlign: 'left', color, fontSize: 14,
                 transition: 'all 0.15s', lineHeight: 1.6,
+                display: 'flex', alignItems: 'center', gap: 8,
               }}>
-              <span style={{ fontFamily: 'JetBrains Mono', marginRight: 10, opacity: 0.6 }}>
+              <span style={{ fontFamily: 'JetBrains Mono', opacity: 0.6, flexShrink: 0 }}>
                 {choice.number}.
               </span>
-              {choice.text}
+              <span style={{ flex: 1 }}>{choice.text}</span>
+              <span onClick={e => { e.stopPropagation(); speak(choice.text) }} style={{
+                fontSize: 13, opacity: 0.5, flexShrink: 0, padding: '0 2px',
+                cursor: 'pointer', userSelect: 'none',
+              }}>{speaking === choice.text ? '🟥' : '🔊'}</span>
             </button>
           )
         })}
@@ -711,9 +738,21 @@ export default function Quiz() {
         }}>
           <div style={{
             background: 'var(--bg2)', borderRadius: 12, padding: '32px 40px',
-            color: 'var(--text2)', fontSize: 15,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, minWidth: 200,
           }}>
-            📖 단어 분석 중...
+            <div style={{ fontSize: 32 }}>{VOCAB_LOADING_MSGS[vocabLoadingStep].icon}</div>
+            <div style={{ color: 'var(--text2)', fontSize: 14, transition: 'opacity 0.3s' }}>
+              {VOCAB_LOADING_MSGS[vocabLoadingStep].text}
+            </div>
+            <div style={{ display: 'flex', gap: 5 }}>
+              {VOCAB_LOADING_MSGS.map((_, i) => (
+                <div key={i} style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: i === vocabLoadingStep ? 'var(--accent)' : 'var(--border)',
+                  transition: 'background 0.3s',
+                }} />
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -780,6 +819,28 @@ export default function Quiz() {
                         }}>{s}</span>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* 원형 카드 */}
+                {vocabModal.root_data && (
+                  <div style={{ background: 'var(--bg3)', borderRadius: 8, padding: '12px 14px', borderLeft: '3px solid var(--accent)' }}>
+                    <div style={{ fontSize: 11, color: 'var(--accent)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>원형 — 함께 저장</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 16 }}>{vocabModal.root_data.word}</span>
+                      {vocabModal.root_data.pos && (
+                        <span style={{ fontSize: 12, color: 'var(--accent)', background: 'rgba(99,102,241,0.1)', padding: '1px 6px', borderRadius: 4 }}>{vocabModal.root_data.pos}</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 14, color: 'var(--text)', marginBottom: vocabModal.root_data.example ? 6 : 0 }}>{vocabModal.root_data.meaning}</div>
+                    {vocabModal.root_data.example && (
+                      <>
+                        <div style={{ fontSize: 13, fontStyle: 'italic', color: 'var(--text2)', lineHeight: 1.6 }}>{vocabModal.root_data.example}</div>
+                        {vocabModal.root_data.example_translation && (
+                          <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 3 }}>{vocabModal.root_data.example_translation}</div>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
 

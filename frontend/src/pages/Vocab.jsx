@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import axios from '../axios'
 import API from '../api'
+import { speak, useSpeaking } from '../tts'
 
 const POS_LABELS = {
   'n.': '명사',
@@ -18,33 +20,75 @@ const POS_OPTIONS = [
 ]
 
 export default function Vocab() {
-  const [items, setItems] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [posFilter, setPosFilter] = useState('')
-  const [highFreqOnly, setHighFreqOnly] = useState(false)
-  const [sort, setSort] = useState('created_desc')
-  const [expanded, setExpanded] = useState(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const posFilter = searchParams.get('pos') || ''
+  const highFreqOnly = searchParams.get('hf') === '1'
+  const sort = searchParams.get('sort') || 'created_desc'
 
-  const load = async () => {
-    setLoading(true)
+  const speaking = useSpeaking()
+  const [allItems, setAllItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [hasNew, setHasNew] = useState(false)
+  const [expanded, setExpanded] = useState(null)
+  const fetchedAtRef = useRef(null)
+
+  const updateParams = (updates) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      Object.entries(updates).forEach(([k, v]) => {
+        if (v) next.set(k, v); else next.delete(k)
+      })
+      return next
+    }, { replace: true })
+  }
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true)
+      try {
+        const res = await axios.get(`${API}/vocab`)
+        setAllItems(res.data)
+        fetchedAtRef.current = new Date().toISOString()
+      } catch (e) {
+        console.error(e)
+      }
+      setLoading(false)
+    })()
+  }, [])
+
+  // 다른 탭에서 단어 저장 시 신호 감지
+  useEffect(() => {
+    const channel = new BroadcastChannel('vocab_update')
+    channel.onmessage = () => setHasNew(true)
+    return () => channel.close()
+  }, [])
+
+  const handleRefresh = async () => {
+    if (!fetchedAtRef.current) return
     try {
-      const params = { sort }
-      if (posFilter) params.pos = posFilter
-      if (highFreqOnly) params.high_freq = true
-      const res = await axios.get(`${API}/vocab`, { params })
-      setItems(res.data)
+      const res = await axios.get(`${API}/vocab`, { params: { after: fetchedAtRef.current } })
+      if (res.data.length > 0) {
+        setAllItems(prev => [...res.data, ...prev])
+      }
+      fetchedAtRef.current = new Date().toISOString()
     } catch (e) {
       console.error(e)
     }
-    setLoading(false)
+    setHasNew(false)
   }
 
-  useEffect(() => { load() }, [posFilter, highFreqOnly, sort])
+  const items = useMemo(() => {
+    let result = allItems
+    if (posFilter) result = result.filter(i => i.pos === posFilter)
+    if (highFreqOnly) result = result.filter(i => i.is_high_freq)
+    if (sort === 'alpha') return [...result].sort((a, b) => a.word.localeCompare(b.word))
+    return [...result].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+  }, [allItems, posFilter, highFreqOnly, sort])
 
   const handleDelete = async (id) => {
     if (!confirm('단어를 삭제할까요?')) return
     await axios.delete(`${API}/vocab/${id}`)
-    setItems(prev => prev.filter(i => i.id !== id))
+    setAllItems(prev => prev.filter(i => i.id !== id))
   }
 
   const selStyle = {
@@ -55,19 +99,43 @@ export default function Vocab() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 8 }}>단어장</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+        <h1 style={{ fontSize: 26, fontWeight: 700 }}>단어장</h1>
+        <button
+          onClick={handleRefresh}
+          title="새로 등록된 단어 가져오기"
+          style={{
+            position: 'relative',
+            background: hasNew ? 'rgba(99,102,241,0.1)' : 'var(--bg3)',
+            border: `1px solid ${hasNew ? 'var(--accent)' : 'var(--border)'}`,
+            borderRadius: 8, padding: '5px 10px', cursor: 'pointer',
+            color: hasNew ? 'var(--accent)' : 'var(--text2)', fontSize: 15,
+            transition: 'all 0.2s',
+          }}
+        >
+          ↻
+          {hasNew && (
+            <span style={{
+              position: 'absolute', top: -4, right: -4,
+              width: 8, height: 8, borderRadius: '50%',
+              background: 'var(--wrong)',
+            }} />
+          )}
+        </button>
+      </div>
       <p style={{ color: 'var(--text2)', marginBottom: 24 }}>
-        문제 풀기 중 등록한 단어 · 숙어 {items.length > 0 && <span style={{ color: 'var(--accent)', fontFamily: 'JetBrains Mono' }}>{items.length}개</span>}
+        문제 풀기 중 등록한 단어 · 숙어{' '}
+        {allItems.length > 0 && <span style={{ color: 'var(--accent)', fontFamily: 'JetBrains Mono' }}>{items.length}개</span>}
       </p>
 
       {/* 필터 / 정렬 */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 24, alignItems: 'center' }}>
-        <select value={posFilter} onChange={e => setPosFilter(e.target.value)} style={selStyle}>
+        <select value={posFilter} onChange={e => updateParams({ pos: e.target.value })} style={selStyle}>
           {POS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
 
         <button
-          onClick={() => setHighFreqOnly(p => !p)}
+          onClick={() => updateParams({ hf: highFreqOnly ? '' : '1' })}
           style={{
             ...selStyle,
             background: highFreqOnly ? 'rgba(234,179,8,0.15)' : 'var(--bg3)',
@@ -83,7 +151,7 @@ export default function Vocab() {
             { val: 'created_desc', label: '최신순' },
             { val: 'alpha', label: '알파벳순' },
           ].map(o => (
-            <button key={o.val} onClick={() => setSort(o.val)} style={{
+            <button key={o.val} onClick={() => updateParams({ sort: o.val === 'created_desc' ? '' : o.val })} style={{
               ...selStyle,
               background: sort === o.val ? 'var(--accent)' : 'var(--bg3)',
               color: sort === o.val ? 'white' : 'var(--text2)',
@@ -110,18 +178,17 @@ export default function Vocab() {
               <div key={item.id} style={{
                 background: 'var(--bg2)', border: '1px solid var(--border)',
                 borderRadius: 'var(--radius)', overflow: 'hidden',
-                transition: 'border-color 0.15s',
               }}>
-                {/* 헤더 */}
                 <div
                   onClick={() => setExpanded(isOpen ? null : item.id)}
-                  style={{
-                    padding: '14px 18px', cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 12,
-                  }}
+                  style={{ padding: '14px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}
                 >
                   <div style={{ flex: 1, display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 16, fontWeight: 700, fontFamily: 'JetBrains Mono' }}>{item.word}</span>
+                    <button onClick={e => { e.stopPropagation(); speak(item.word) }} style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      fontSize: 14, padding: '0 2px', color: 'var(--text2)', lineHeight: 1,
+                    }}>{speaking === item.word ? '🟥' : '🔊'}</button>
                     {item.pos && (
                       <span style={{ fontSize: 12, color: 'var(--accent)', background: 'rgba(99,102,241,0.1)', padding: '2px 7px', borderRadius: 4 }}>
                         {item.pos}
@@ -137,7 +204,6 @@ export default function Vocab() {
                   <span style={{ color: 'var(--text2)', fontSize: 12 }}>{isOpen ? '▲' : '▼'}</span>
                 </div>
 
-                {/* 상세 */}
                 {isOpen && (
                   <div style={{ borderTop: '1px solid var(--border)', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
                     {item.example && (

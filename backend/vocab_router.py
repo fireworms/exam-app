@@ -35,6 +35,7 @@ ANALYZE_PROMPT = """당신은 9급 공무원 영어 시험 전문 어휘 분석�
 - example_translation: 예문 한국어 번역
 - synonyms: 9급 시험에서 동의어로 출제 가능한 단어/구 2~3개 (영어). 없으면 빈 배열.
 - is_high_freq: 9급 공무원 영어 시험에서 고빈도로 출제되는 어휘이면 true
+- root_form: 입력 단어가 파생어(과거분사·현재분사가 형용사로 쓰인 경우, -ly 부사, -tion/-ness 등 명사화)일 때 원형 동사/형용사. 원형과 동일하거나 숙어이면 null. 예) "diluted"→"dilute", "running"→"run", "carefully"→"careful", "pollution"→"pollute", "happiness"→"happy", "dilute"→null
 
 응답 형식:
 {{
@@ -45,7 +46,8 @@ ANALYZE_PROMPT = """당신은 9급 공무원 영어 시험 전문 어휘 분석�
   "example": "영어 예문",
   "example_translation": "예문 한국어 번역",
   "synonyms": ["동의어1", "동의어2"],
-  "is_high_freq": true or false
+  "is_high_freq": true or false,
+  "root_form": "원형 단어" or null
 }}"""
 
 
@@ -63,6 +65,39 @@ class SaveVocabRequest(BaseModel):
     synonyms: Optional[list] = None
     is_high_freq: bool = False
     source_text: Optional[str] = None
+    root_form: Optional[str] = None
+    root_data: Optional[dict] = None
+
+
+def _analyze_text(text: str) -> dict:
+    client = _get_gemini()
+    prompt = ANALYZE_PROMPT.format(text=text)
+    response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=prompt)
+    raw = response.text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1]
+        raw = raw.rsplit("```", 1)[0]
+    return json.loads(raw)
+
+
+def _upsert_vocab(sb, user_id: str, data: dict):
+    word = data["word"]
+    existing = sb.table("exam_vocab").select("id").eq("user_id", user_id).eq("word", word).execute()
+    row = {
+        "type": data.get("type", "word"),
+        "pos": data.get("pos"),
+        "meaning": data.get("meaning", ""),
+        "example": data.get("example"),
+        "example_translation": data.get("example_translation"),
+        "synonyms": data.get("synonyms") or [],
+        "is_high_freq": data.get("is_high_freq", False),
+        "source_text": data.get("source_text"),
+    }
+    if existing.data:
+        sb.table("exam_vocab").update(row).eq("user_id", user_id).eq("word", word).execute()
+        return existing.data[0]["id"], False
+    res = sb.table("exam_vocab").insert({"user_id": user_id, "word": word, **row}).execute()
+    return res.data[0]["id"], True
 
 
 @router.post("/analyze")
@@ -73,81 +108,50 @@ def analyze_vocab(req: AnalyzeRequest, user_id: str = Depends(get_current_user))
     if len(text) > 200:
         raise HTTPException(status_code=400, detail="선택 텍스트가 너무 길어요 (200자 이하)")
 
-    client = _get_gemini()
-    prompt = ANALYZE_PROMPT.format(text=text)
-
     try:
-        response = client.models.generate_content(
-            model="gemini-3.1-flash-lite",
-            contents=prompt,
-        )
-        raw = response.text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1]
-            raw = raw.rsplit("```", 1)[0]
-        data = json.loads(raw)
+        data = _analyze_text(text)
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="AI 분석 실패 — 다시 시도해주세요")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gemini 오류: {str(e)}")
 
-    return {**data, "source_text": text}
+    root_data = None
+    root_form = data.get("root_form")
+    if root_form and root_form.lower() != data["word"].lower():
+        try:
+            root_data = _analyze_text(root_form)
+        except Exception:
+            pass
+
+    return {**data, "source_text": text, "root_data": root_data}
 
 
 @router.post("")
 def save_vocab(req: SaveVocabRequest, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
-    existing = sb.table("exam_vocab").select("id").eq("user_id", user_id).eq("word", req.word).execute()
-    if existing.data:
-        # 이미 있으면 업데이트
-        sb.table("exam_vocab").update({
-            "type": req.type,
-            "pos": req.pos,
-            "meaning": req.meaning,
-            "example": req.example,
-            "example_translation": req.example_translation,
-            "synonyms": req.synonyms or [],
-            "is_high_freq": req.is_high_freq,
-            "source_text": req.source_text,
-        }).eq("user_id", user_id).eq("word", req.word).execute()
-        return {"updated": True, "id": existing.data[0]["id"]}
+    vocab_id, created = _upsert_vocab(sb, user_id, req.model_dump())
 
-    res = sb.table("exam_vocab").insert({
-        "user_id": user_id,
-        "word": req.word,
-        "type": req.type,
-        "pos": req.pos,
-        "meaning": req.meaning,
-        "example": req.example,
-        "example_translation": req.example_translation,
-        "synonyms": req.synonyms or [],
-        "is_high_freq": req.is_high_freq,
-        "source_text": req.source_text,
-    }).execute()
+    root_saved = None
+    if req.root_data and req.root_data.get("word", "").lower() != req.word.lower():
+        try:
+            _upsert_vocab(sb, user_id, {**req.root_data, "source_text": None})
+            root_saved = req.root_data["word"]
+        except Exception:
+            pass
 
-    return {"created": True, "id": res.data[0]["id"]}
+    return {"created": created, "id": vocab_id, "root_saved": root_saved}
 
 
 @router.get("")
 def list_vocab(
-    pos: Optional[str] = None,
-    high_freq: Optional[bool] = None,
-    sort: str = "created_desc",
+    after: Optional[str] = None,
     user_id: str = Depends(get_current_user),
 ):
     sb = get_supabase()
     q = sb.table("exam_vocab").select("*").eq("user_id", user_id)
-
-    if pos:
-        q = q.eq("pos", pos)
-    if high_freq is not None:
-        q = q.eq("is_high_freq", high_freq)
-
-    if sort == "alpha":
-        q = q.order("word", desc=False)
-    else:
-        q = q.order("created_at", desc=True)
-
+    if after:
+        q = q.gt("created_at", after)
+    q = q.order("created_at", desc=False)
     res = q.execute()
     return res.data
 

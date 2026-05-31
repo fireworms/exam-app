@@ -6,7 +6,7 @@ from jwt import PyJWKClient
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 _jwks_client = PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json", cache_keys=True)
 
-def get_current_user(authorization: str = Header(...)) -> str:
+def get_current_user(authorization: str = Header(None)) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="인증 토큰이 없어요")
     token = authorization[7:]

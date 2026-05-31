@@ -41,10 +41,7 @@ export function EditQuestionContent({ questionId, onClose, onDirtyChange }) {
     try {
       const res = await axios.get(`${API}/questions/${questionId}`)
       setQ(res.data)
-      try {
-        await axios.get(`${API}/questions/${questionId}/image`, { responseType: 'blob' })
-        setImageUrl(`${API}/questions/${questionId}/image?t=${Date.now()}`)
-      } catch { setImageUrl(null) }
+      setImageUrl(res.data.question_image || null)
     } catch (e) { console.error(e) }
     setLoading(false)
   }
@@ -73,8 +70,8 @@ export function EditQuestionContent({ questionId, onClose, onDirtyChange }) {
       const blob = await getCroppedBlob(imgRef.current, completedCrop)
       const formData = new FormData()
       formData.append('file', blob, 'cropped.jpg')
-      await axios.post(`${API}/questions/${questionId}/image`, formData)
-      setImageUrl(`${API}/questions/${questionId}/image?t=${Date.now()}`)
+      const uploadRes = await axios.post(`${API}/questions/${questionId}/image`, formData)
+      setImageUrl(uploadRes.data.url)
       setCropMode(false)
       setCropSrc(null)
     } catch (e) { alert('업로드 실패: ' + e.message) }

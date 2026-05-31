@@ -24,23 +24,34 @@ from auth import get_current_user
 def _new_auth_client():
     """로그인/회원가입 전용 클라이언트 - 싱글톤 오염 방지"""
     return _create_supabase_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_KEY"))
-from upload_router import router as upload_router
 from edit_router import router as edit_router
 from vocab_router import router as vocab_router
 
-os.makedirs(os.path.join(BASE_DIR, "images"), exist_ok=True)
+_IS_VERCEL = bool(os.getenv("VERCEL"))
+
+if not _IS_VERCEL:
+    from upload_router import router as upload_router
+    try:
+        os.makedirs(os.path.join(BASE_DIR, "images"), exist_ok=True)
+    except OSError:
+        pass
 
 app = FastAPI()
 api_router = APIRouter()
 
-app.include_router(upload_router, prefix="/api")
+if not _IS_VERCEL:
+    app.include_router(upload_router, prefix="/api")
 app.include_router(edit_router, prefix="/api")
 app.include_router(vocab_router, prefix="/api")
 
+_cors_origins = (
+    ["*"] if _IS_VERCEL
+    else ["http://localhost:5173", "http://localhost:8008", "http://192.168.50.102:8008"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:8008", "http://192.168.50.102:8008"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=not _IS_VERCEL,
     allow_methods=["*"],
     allow_headers=["*"],
 )

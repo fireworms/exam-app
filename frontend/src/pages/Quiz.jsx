@@ -165,12 +165,7 @@ export default function Quiz() {
         const scrapRes = await axios.get(`${API}/scraps`)
         setScraps(new Set(scrapRes.data.map(s => s.id)))
         const imageMap = {}
-        await Promise.all(parsed.map(async (q) => {
-          try {
-            await axios.get(`${API}/questions/${q.id}/image`, { responseType: 'blob' })
-            imageMap[q.id] = `${API}/questions/${q.id}/image`
-          } catch { imageMap[q.id] = null }
-        }))
+        parsed.forEach(q => { imageMap[q.id] = q.question_image || null })
         setImageUrls(imageMap)
         setLoading(false)
         return
@@ -205,12 +200,7 @@ export default function Quiz() {
       setScraps(new Set(scrapRes.data.map(s => s.id)))
 
       const imageMap = {}
-      await Promise.all(res.data.map(async (q) => {
-        try {
-          await axios.get(`${API}/questions/${q.id}/image`, { responseType: 'blob' })
-          imageMap[q.id] = `${API}/questions/${q.id}/image`
-        } catch { imageMap[q.id] = null }
-      }))
+      res.data.forEach(q => { imageMap[q.id] = q.question_image || null })
       setImageUrls(imageMap)
       await startSession(res.data)
     } catch (e) {

@@ -5,8 +5,8 @@ const instance = axios.create()
 
 let currentToken = null
 
-// 세션 초기화
-supabase.auth.getSession().then(({ data: { session } }) => {
+// getSession() 완료 전에 API 요청이 나가지 않도록 Promise로 대기
+const tokenReady = supabase.auth.getSession().then(({ data: { session } }) => {
   currentToken = session?.access_token || null
 })
 
@@ -18,7 +18,8 @@ supabase.auth.onAuthStateChange((_event, session) => {
   }
 })
 
-instance.interceptors.request.use(config => {
+instance.interceptors.request.use(async config => {
+  await tokenReady
   if (currentToken) {
     config.headers.Authorization = `Bearer ${currentToken}`
   }

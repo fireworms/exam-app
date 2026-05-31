@@ -19,7 +19,7 @@
 | 프론트엔드 | React + Vite (JSX, CSS-in-JS + `<style>` 태그) |
 | AI 파서 | Gemini `gemini-2.0-flash-preview`, Claude `claude-sonnet-4-6` |
 | 인증 | Supabase Auth (email/password, JWT Bearer) |
-| 배포 | FastAPI가 `frontend/dist` 정적 파일 서빙 (포트 8008) |
+| 배포 | 로컬: FastAPI가 `frontend/dist` 정적 파일 서빙 (포트 8008) / 외부: Vercel (서버리스) |
 
 ---
 
@@ -108,10 +108,11 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 
 ## 이미지 처리
 
-- 저장 위치: `backend/images/q_{question_id}.jpg`
-- DB 컬럼: `question_image` — 절대경로 문자열
-- 서빙: `GET /api/questions/{id}/image`
-- `edit_router.py`의 `_resolve_path()` 헬퍼가 구형 Windows 백슬래시 경로도 처리
+- 저장 위치: Supabase Storage 버킷 `question-images` (public)
+- DB 컬럼: `question_image` — Storage 공개 URL 문자열
+- 서빙: `<img src={q.question_image} />` 직접 사용 (API 프록시 없음)
+- `GET /api/questions/{id}/image` — Storage URL로 302 리다이렉트 (레거시 호환)
+- `edit_router.py`: 업로드/삭제 모두 `sb.storage.from_("question-images")` 사용
 
 ---
 

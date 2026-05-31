@@ -47,8 +47,10 @@ nohup uvicorn main:app --host 0.0.0.0 --port 8008 > /tmp/backend.log 2>&1 &
 | `backend/db.py` | `get_supabase()`, `_new_auth_client()` |
 | `backend/upload_router.py` | PDF/JSON 업로드 (`/api/upload`) |
 | `backend/edit_router.py` | 문제 편집/이미지 (`/api/questions`) |
+| `backend/vocab_router.py` | 단어장 (`/api/vocab`) |
 | `backend/images/` | 문제 이미지 파일 (`q_{id}.jpg`) |
 | `frontend/src/axios.js` | axios 인터셉터 (JWT 주입, refresh) |
+| `frontend/src/tts.js` | TTS 유틸 — `speak()`, `useSpeaking()` 훅 |
 | `frontend/src/pages/` | 페이지 컴포넌트 |
 
 ---
@@ -80,6 +82,7 @@ exam_scraps         id, user_id, question_id UNIQUE, memo, created_at
 exam_sessions       id, user_id, mode, subject, exam_id, total_count, correct_count, skipped_count, duration
 exam_settings       id, user_id, auto_remove_wrong
 exam_reports        id, user_id, question_id UNIQUE(user_id,question_id), created_at
+exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example, example_translation, synonyms(jsonb), is_high_freq, source_text, created_at
 ```
 
 ---
@@ -168,6 +171,15 @@ exam_reports        id, user_id, question_id UNIQUE(user_id,question_id), create
 | `POST /api/upload/json` | JSON 직접 임포트 |
 | `GET /api/upload/logs` | 업로드 로그 최근 100건 |
 
+### vocab_router.py (`/api/vocab`)
+
+| 엔드포인트 | 설명 |
+|-----------|------|
+| `POST /api/vocab/analyze` | 선택 텍스트 Gemini 분석 → 단어 정보 + root_data 반환 |
+| `POST /api/vocab` | 단어 저장 (upsert) — root_data 있으면 원형도 함께 저장 |
+| `GET /api/vocab` | 단어 목록 (after 파라미터로 증분 fetch 지원) |
+| `DELETE /api/vocab/{id}` | 단어 삭제 |
+
 ### edit_router.py (`/api/questions`)
 
 | 엔드포인트 | 설명 |
@@ -192,6 +204,7 @@ exam_reports        id, user_id, question_id UNIQUE(user_id,question_id), create
 | `/stats` | Stats | 통계 + 많이 틀린 문제 |
 | `/admin` | Admin | 관리자 페이지 (비밀번호 게이트) — 업로드/로그/회차관리/신고 탭 |
 | `/edit/:question_id` | EditQuestion | 문제/이미지 수정 |
+| `/vocab` | Vocab | 단어장 목록 (필터·정렬, URL 파라미터 유지) |
 | `/settings` | Settings | auto_remove_wrong 설정 |
 | `/upload`, `/logs` | — | `/admin`으로 리다이렉트 |
 
@@ -235,3 +248,6 @@ AI 파서가 공통지문 문제를 `(N번 공통지문 문제)` 형태로 마�
 - Quiz 신고 버튼: 🚩 버튼 → `POST /api/reports/{id}`, 중복 신고 무시
 - 랜덤 문제: DB 조회 후 `random.shuffle()` 적용 — 미적용 시 ID 순(연도순) 정렬됨
 - 토큰 갱신(`/api/auth/refresh`) 에러 구분: 네트워크 오류 → 503(로그아웃 안 함), 실제 토큰 만료/무효 → 401(로그아웃)
+- 단어장 모드: Quiz에서 드래그 → Gemini 분석 → 모달 확인 후 저장. 파생어면 원형(`root_data`)도 함께 분석·표시·저장
+- 단어장 목록: 초기 1회 fetch 후 필터·정렬은 클라이언트 `useMemo` 처리. 다른 탭 저장 감지는 `BroadcastChannel('vocab_update')`
+- TTS(`tts.js`): 한글/영어 구간 분리 후 각각 ko-KR·en-US로 큐 읽기. `__밑줄__` 마크업·3개 이상 언더스코어·원문자 전처리 제거

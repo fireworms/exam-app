@@ -1,3 +1,11 @@
+import sys
+import os
+
+# Vercel entrypoint(pyproject.toml)로 직접 로드될 때 sibling 모듈 경로 보장
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
+
 from fastapi import FastAPI, APIRouter, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -5,7 +13,6 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 import random
-import os
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
@@ -14,7 +21,7 @@ KST = timezone(timedelta(hours=9))
 def now_kst() -> str:
     return datetime.now(KST).isoformat()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = _BACKEND_DIR
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 from supabase import create_client as _create_supabase_client

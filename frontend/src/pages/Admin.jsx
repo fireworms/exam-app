@@ -205,9 +205,10 @@ function QuestionBrowser() {
   )
 }
 
+const isLocal = ['localhost', '127.0.0.1', '192.168.50.102'].includes(window.location.hostname)
+
 const TABS = [
-  { id: 'upload', label: '업로드' },
-  { id: 'logs', label: '로그' },
+  ...(isLocal ? [{ id: 'upload', label: '업로드' }, { id: 'logs', label: '로그' }] : []),
   { id: 'exams', label: '회차 관리' },
   { id: 'edit', label: '문제 편집' },
   { id: 'reports', label: '신고' },
@@ -219,7 +220,8 @@ export default function Admin() {
   const [input, setInput] = useState('')
   const [err, setErr] = useState(false)
 
-  const tab = searchParams.get('tab') || 'upload'
+  const rawTab = searchParams.get('tab') || (isLocal ? 'upload' : 'exams')
+  const tab = (!isLocal && (rawTab === 'upload' || rawTab === 'logs')) ? 'exams' : rawTab
   const setTab = (id) => setSearchParams({ tab: id })
 
   const tryUnlock = () => {

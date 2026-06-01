@@ -101,7 +101,10 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 ### ⚠️ Vercel 배포 관련
 
 - **프로덕션 URL**: https://exam-app-two-nu.vercel.app
-- **재배포**: `cd /home/fireworms/exam-app && vercel --prod --yes` (반드시 루트에서 실행)
+- **재배포**: 반드시 프로젝트 루트(`/home/fireworms/exam-app`)에서 실행 — `frontend/` 안에서 실행하면 다른 프로젝트로 배포됨
+  ```bash
+  cd /home/fireworms/exam-app && vercel --prod --yes
+  ```
 - **환경변수**: Vercel 대시보드 또는 `vercel env add/rm` — `SUPABASE_SERVICE_KEY`는 Supabase 대시보드의 service_role **JWT** 키 사용 (`sb_secret_` 포맷 아님)
 - `api/index.py` + `pyproject.toml` — Vercel이 `backend.main:app` 로드. `upload_router`는 `VERCEL=1` 환경변수로 자동 제외
 - `backend/main.py` 상단 `sys.path.insert` — Vercel에서 sibling 모듈 임포트 보장
@@ -133,6 +136,8 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 - upload_router, edit_router도 `/api/upload`, `/api/questions`로 마운트
 - 프론트 `src/api.js`의 기본 base URL: `/api`
 - SPA 캐치올(`/{full_path:path}`)은 `@app.get`으로 별도 등록 — API 라우터와 분리되어 페이지 새로고침 정상 작동
+- 캐치올에서 `full_path.startswith("api/")` 이면 404 반환 — 미등록 API 경로가 HTML을 반환하는 버그 방지
+- `index.html` 반환 시 `Cache-Control: no-cache` 헤더 설정 — 재배포 후 구 asset 해시 참조 방지
 
 ---
 
@@ -229,6 +234,7 @@ PC(768px+): `body { zoom: 1.25 }`
 - `Admin.jsx` 상단 `ADMIN_PW` 상수로 비밀번호 변경 (기본값 `'1234'`)
 - sessionStorage `_adm` 키로 세션 내 잠금 유지
 - 신고 목록: 모든 유저의 신고 표시, 편집/해제 버튼 제공
+- **업로드·로그 탭**: `localhost`, `127.0.0.1`, `192.168.50.102` 접속 시에만 표시 (Vercel 외부 접근 시 숨김)
 
 ---
 

@@ -16,7 +16,7 @@ export function UploadLogs() {
   const fetchLogs = async () => {
     try {
       const { data } = await axiosInstance.get(`${API}/upload/logs`);
-      setLogs(data.logs);
+      setLogs(data.logs ?? []);
     } catch (e) {
       console.error(e);
     } finally {

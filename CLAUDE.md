@@ -108,10 +108,12 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 ### ⚠️ Vercel 배포 관련
 
 - **프로덕션 URL**: https://exam-app-two-nu.vercel.app
-- **재배포**: 반드시 프로젝트 루트(`/home/fireworms/exam-app`)에서 실행 — `frontend/` 안에서 실행하면 다른 프로젝트로 배포됨
+- **배포 = GitHub 자동배포** — Vercel 프로젝트가 `github.com/fireworms/exam-app`에 연동돼 있음. **코드 변경 시 커밋 후 `master`에 push하면 prod 자동 배포된다.** 수동 `vercel --prod`로 따로 배포하지 말 것 — 과거 수동 배포가 커밋보다 앞서며 변경이 누락된 적 있음.
   ```bash
-  cd /home/fireworms/exam-app && vercel --prod --yes
+  git push origin master   # → Vercel prod 자동 배포
   ```
+  - 폴백(긴급/연동 장애 시에만): 반드시 루트(`/home/fireworms/exam-app`)에서 `vercel --prod --yes` — `frontend/` 안에서 실행하면 다른 프로젝트로 배포됨
+  - DB 데이터 변경(문제 교체 등)은 Supabase 공유라 배포 불필요 — push 없이도 prod 즉시 반영
 - **환경변수**: Vercel 대시보드 또는 `vercel env add/rm` — `SUPABASE_SERVICE_KEY`는 Supabase 대시보드의 service_role **JWT** 키 사용 (`sb_secret_` 포맷 아님)
 - `api/index.py` + `pyproject.toml` — Vercel이 `backend.main:app` 로드. `upload_router`는 `VERCEL=1` 환경변수로 자동 제외
 - `backend/main.py` 상단 `sys.path.insert` — Vercel에서 sibling 모듈 임포트 보장

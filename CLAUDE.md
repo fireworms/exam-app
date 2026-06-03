@@ -34,6 +34,13 @@ nohup uvicorn main:app --host 0.0.0.0 --port 8008 > /tmp/backend.log 2>&1 &
 
 접속: `http://192.168.50.102:8008` / 로그: `/tmp/backend.log`
 
+> **로컬 백엔드는 on-demand 전용** — 프로덕션은 Vercel에서 돌고, 로컬은 필요할 때만 띄운다.
+> 부팅 시 자동 시작(systemd)·상시 데몬을 두지 말 것. 과거 `exam-app.service`(systemd) 유닛이
+> 부팅마다 `python main.py`를 띄우다 8008 포트 충돌(`Errno 98`)로 5초마다 크래시·재시작하며
+> `reload=True` import로 CPU를 태운 적 있음 → 유닛 제거함. 다시 만들지 말 것.
+> 위 `nohup uvicorn` 또는 루트의 `./exam.sh`(dev/build/stop) 런처로 수동 실행.
+> `main.py` 끝의 `uvicorn.run(..., reload=True)`는 **로컬 개발 편의용**(파일 변경 자동 반영)이며 서비스/상시 구동용 아님.
+
 환경변수 (`backend/.env`): `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`
 
 ---

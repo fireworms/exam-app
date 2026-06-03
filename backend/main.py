@@ -747,5 +747,8 @@ if os.path.exists(FRONTEND_DIST):
         return FileResponse(os.path.join(FRONTEND_DIST, "index.html"), headers=_NO_CACHE)
 
 if __name__ == "__main__":
+    # 로컬 개발 편의용 진입점(파일 변경 자동 반영). on-demand 수동 실행 전용이며
+    # systemd 등으로 부팅 시 상시 구동하지 말 것 — reload=True가 매 재시작마다 전체
+    # import로 CPU를 태운다. 자세한 배경은 루트 CLAUDE.md '실행' 섹션 참고.
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8008, reload=True)

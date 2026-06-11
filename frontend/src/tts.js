@@ -2,6 +2,30 @@ import { useState, useEffect } from 'react'
 
 let current = null
 
+// 검증된 여성 음성 이름만 매칭 — 실패 시 utt.voice 미지정으로 기기 기본 음성 사용
+const PREFERRED_VOICES = {
+  'ko-KR': ['Yuna', '유나', 'Google 한국의', 'SunHi', 'Heami'],
+  'en-US': ['Samantha', 'Google US English', 'Aria', 'Jenny', 'Zira'],
+}
+
+let voices = []
+function loadVoices() {
+  voices = window.speechSynthesis.getVoices() || []
+}
+if (window.speechSynthesis) {
+  loadVoices()
+  window.speechSynthesis.addEventListener?.('voiceschanged', loadVoices)
+}
+
+function pickVoice(lang) {
+  const candidates = voices.filter(v => v.lang?.replace('_', '-').startsWith(lang.slice(0, 2)))
+  for (const name of PREFERRED_VOICES[lang] || []) {
+    const v = candidates.find(v => v.name.includes(name))
+    if (v) return v
+  }
+  return null
+}
+
 function dispatch(text) {
   current = text
   window.dispatchEvent(new CustomEvent('tts_change', { detail: text }))
@@ -52,6 +76,8 @@ export function speak(text) {
     const utt = new SpeechSynthesisUtterance(seg.text)
     utt.lang = seg.lang
     utt.rate = 0.9
+    const voice = pickVoice(seg.lang)
+    if (voice) utt.voice = voice
     if (i === segments.length - 1) utt.onend = () => dispatch(null)
     window.speechSynthesis.speak(utt)
   })

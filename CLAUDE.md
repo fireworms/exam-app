@@ -169,8 +169,8 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 | `GET /api/questions/by_ids` | ID 배열로 문제 조회 |
 | `GET /api/questions/deeplink` | 딥링크용 단일 문제 |
 | `GET /api/questions/{id}` | 단일 문제 |
-| `POST /api/solve` | 답안 제출 → 정답 확인, 오답노트 처리 |
-| `POST /api/solve/batch` | 답안 일괄 제출 (시험 모드) — 한 요청으로 채점·기록 |
+| `POST /api/solve` | 답안 제출 → 정답 확인, 오답노트 처리, 오답 시 누적 `wrong_count` 반환 |
+| `POST /api/solve/batch` | 답안 일괄 제출 (시험 모드) — 한 요청으로 채점·기록, 오답별 `wrong_count` 포함 |
 | `GET /api/wrong-notes` | 오답노트 목록 |
 | `DELETE /api/wrong-notes/{question_id}` | 오답노트 제거 |
 | `PUT /api/wrong-notes/{question_id}/memo` | 오답노트 메모 수정 |
@@ -273,6 +273,8 @@ AI 파서가 공통지문 문제를 `(N번 공통지문 문제)` 형태로 마�
 ## 기타
 
 - **인증 없을 때 응답**: `auth.py`에서 `Header(None)` 사용 — 헤더 없으면 422 아닌 401 반환
+- **`exam_solve_history.is_correct`는 integer 컬럼** — supabase-py `.eq("is_correct", False)`는 postgrest 22P02 에러(invalid input for integer). 반드시 `0`/`1`로 비교할 것
+- 누적 오답 횟수(`wrong_count`): `_wrong_counts()` 헬퍼 — solve 응답·오답노트·세션 리뷰에 표시 ("N회 틀림" 뱃지는 `QuestionCard`)
 - 학습자료: 별도 앱으로 분리됨 — 이 앱에 없음
 - 홈 성능: 전체 문제 fetch 대신 `/api/stats/counts` count only 사용
 - 선지 선택: 클라이언트 즉시 판정 후 `/api/solve` 백그라운드 전송

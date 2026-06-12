@@ -248,7 +248,7 @@ export default function Quiz() {
 
     const q = questions[current]
     const is_correct = !!(q.choices.find(c => c.number === choiceNum)?.is_correct)
-    setResult({ is_correct })
+    setResult({ is_correct, qid: q.id })
     if (is_correct) {
       correctCountRef.current += 1
       setScore(prev => ({ correct: prev.correct + 1, total: prev.total + 1 }))
@@ -262,6 +262,10 @@ export default function Quiz() {
       selected_choice: choiceNum,
       time_taken: timeTaken,
       session_id: sessionId,
+    }).then(res => {
+      // 누적 오답 횟수 도착 — 아직 같은 문제를 보고 있을 때만 배너에 반영
+      const wc = res.data.wrong_count
+      if (wc) setResult(prev => (prev && prev.qid === q.id ? { ...prev, wrong_count: wc } : prev))
     }).catch(e => console.error(e))
   }
 
@@ -334,6 +338,16 @@ export default function Quiz() {
     const skipped = questions.length - batchAnswers.length
     const duration = timeLimitParam * 60 - timeLeftRef.current
     axios.post(`${API}/solve/batch`, { answers: batchAnswers, session_id: currentSessionId })
+      .then(res => {
+        // 누적 오답 횟수 머지 — 리뷰 화면에 "N회 틀림" 표시용
+        const wcMap = {}
+        res.data.results.forEach(r => { if (r.wrong_count) wcMap[r.question_id] = r.wrong_count })
+        if (Object.keys(wcMap).length) {
+          setExamResults(prev => prev.map(it =>
+            wcMap[it.question.id] ? { ...it, wrong_count: wcMap[it.question.id] } : it
+          ))
+        }
+      })
       .catch(e => console.error(e))
     if (currentSessionId) {
       axios.put(`${API}/sessions/${currentSessionId}/end`, {
@@ -364,6 +378,7 @@ export default function Quiz() {
             question: r.question,
             selected_choice: r.selectedChoice,
             is_correct: r.is_correct,
+            wrong_count: r.wrong_count || 0,
           })),
         },
       },
@@ -725,6 +740,11 @@ export default function Quiz() {
             fontWeight: 600,
           }}>
             {result.is_correct ? '✓ 정답!' : '✗ 오답'}
+            {!result.is_correct && result.wrong_count >= 2 && (
+              <span style={{ marginLeft: 10, fontSize: 13, fontWeight: 700 }}>
+                🔁 이 문제 {result.wrong_count}번째 틀렸어요
+              </span>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
             <button onClick={() => setShowExplanation(p => !p)} style={{

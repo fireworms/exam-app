@@ -98,6 +98,7 @@ export default function SessionReview() {
 
         <QuestionCard q={item.question} selectedChoice={item.selected_choice}
           showImage showExplanation
+          wrongCount={item.is_correct === false ? item.wrong_count : 0}
           headerRight={
             <button onClick={() => navigate(`/edit/${item.question.id}?return=${encodeURIComponent(location.pathname)}`)} style={{
               background: 'transparent', color: 'var(--text2)', fontSize: 12,
@@ -188,6 +189,9 @@ export default function SessionReview() {
                 color: item.is_correct ? 'var(--correct)' : item.is_correct === false ? 'var(--wrong)' : 'var(--text2)',
               }}>
                 {item.is_correct ? 'O' : item.is_correct === false ? 'X' : '—'}
+                {item.is_correct === false && item.wrong_count >= 2 && (
+                  <span style={{ display: 'block', fontSize: 10, fontWeight: 700 }}>{item.wrong_count}회째</span>
+                )}
               </span>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 2 }}>

@@ -10,6 +10,7 @@ export default function QuestionCard({
   maxLength = null,      // 지문 미리보기 길이 (null이면 전문)
   showImage = false,
   showExplanation = false,
+  wrongCount = 0,        // 누적 오답 횟수 — 0이면 미표시
   headerRight = null,
   children = null,
 }) {
@@ -21,6 +22,14 @@ export default function QuestionCard({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
         <div style={{ fontSize: 12, color: 'var(--text2)' }}>
           {q.subject} · {q.year}년 {q.month}월 · Q{q.number}
+          {wrongCount > 0 && (
+            <span style={{
+              marginLeft: 8, color: 'var(--wrong)', fontWeight: 700,
+              background: 'rgba(248,113,113,0.1)', padding: '1px 8px', borderRadius: 5,
+            }}>
+              ✗ {wrongCount}회 틀림
+            </span>
+          )}
         </div>
         {headerRight}
       </div>

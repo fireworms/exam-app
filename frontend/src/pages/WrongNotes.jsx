@@ -17,7 +17,7 @@ function NoteCard({ q, onRemove }) {
   }
 
   return (
-    <QuestionCard q={q} maxLength={150}
+    <QuestionCard q={q} maxLength={150} wrongCount={q.wrong_count}
       headerRight={
         <button onClick={() => onRemove(q.id)} style={{
           background: 'transparent', color: 'var(--text2)', fontSize: 12,

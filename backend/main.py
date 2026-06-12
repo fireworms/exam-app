@@ -369,6 +369,18 @@ class SolveBatchRequest(BaseModel):
     session_id: Optional[int] = None
 
 
+def _wrong_counts(sb, user_id: str, question_ids: list) -> dict:
+    """문제별 누적 오답 횟수 {question_id: count}"""
+    if not question_ids:
+        return {}
+    # is_correct는 integer 컬럼 — False로 비교하면 postgrest가 22P02를 뱉는다
+    res = sb.table("exam_solve_history").select("question_id").eq("user_id", user_id).eq("is_correct", 0).in_("question_id", question_ids).execute()
+    counts: dict = {}
+    for r in res.data:
+        counts[r["question_id"]] = counts.get(r["question_id"], 0) + 1
+    return counts
+
+
 def _record_solves(sb, user_id: str, answers: list[dict], session_id: Optional[int]) -> list:
     """답안 목록을 일괄 채점·기록. answers: [{question_id, selected_choice, time_taken}]"""
     q_ids = [a["question_id"] for a in answers]
@@ -398,6 +410,12 @@ def _record_solves(sb, user_id: str, answers: list[dict], session_id: Optional[i
     correct_ids = [r["question_id"] for r in results if r["is_correct"]]
 
     if wrong_ids:
+        # 누적 오답 횟수 (방금 insert한 이번 오답 포함)
+        counts = _wrong_counts(sb, user_id, wrong_ids)
+        for r in results:
+            if not r["is_correct"]:
+                r["wrong_count"] = counts.get(r["question_id"], 1)
+
         existing = sb.table("exam_wrong_notes").select("question_id").eq("user_id", user_id).in_("question_id", wrong_ids).execute()
         existing_ids = {e["question_id"] for e in existing.data}
         new_notes = [{"user_id": user_id, "question_id": qid, "is_dismissed": 0} for qid in wrong_ids if qid not in existing_ids]
@@ -424,7 +442,7 @@ def submit_solve(req: SolveRequest, user_id: str = Depends(get_current_user)):
     }], req.session_id)
     if not results:
         raise HTTPException(status_code=404, detail="Choice not found")
-    return {"is_correct": results[0]["is_correct"]}
+    return {"is_correct": results[0]["is_correct"], "wrong_count": results[0].get("wrong_count")}
 
 
 @api_router.post("/solve/batch")
@@ -447,8 +465,10 @@ def get_wrong_notes(user_id: str = Depends(get_current_user)):
     q_ids = [w["question_id"] for w in wn_res.data]
     meta = {w["question_id"]: {"added_at": w["added_at"], "memo": w["memo"]} for w in wn_res.data}
     questions = fetch_questions_by_ids(sb, q_ids)
+    counts = _wrong_counts(sb, user_id, q_ids)
     for q in questions:
         q.update(meta.get(q["id"], {}))
+        q["wrong_count"] = counts.get(q["id"], 0)
     questions.sort(key=lambda q: meta.get(q["id"], {}).get("added_at", ""), reverse=True)
     return questions
 
@@ -683,6 +703,8 @@ def get_session_detail(session_id: int, user_id: str = Depends(get_current_user)
 
     sh_res = sb.table("exam_solve_history").select("question_id, selected_choice, is_correct, time_taken").eq("user_id", user_id).eq("session_id", session_id).order("id").execute()
     q_map = {q["id"]: q for q in fetch_questions_by_ids(sb, [r["question_id"] for r in sh_res.data])}
+    wrong_q_ids = [r["question_id"] for r in sh_res.data if not r["is_correct"]]
+    counts = _wrong_counts(sb, user_id, wrong_q_ids)
     items = [
         {
             "question": q_map[r["question_id"]],
@@ -690,6 +712,7 @@ def get_session_detail(session_id: int, user_id: str = Depends(get_current_user)
             # DB는 1/0 정수 — 프론트가 true/false/null(미답변)을 구분하므로 bool로 정규화
             "is_correct": bool(r["is_correct"]),
             "time_taken": r["time_taken"],
+            "wrong_count": counts.get(r["question_id"], 0),
         }
         for r in sh_res.data if r["question_id"] in q_map
     ]
@@ -701,7 +724,7 @@ def get_session_detail(session_id: int, user_id: str = Depends(get_current_user)
 @api_router.get("/stats/wrong-counts")
 def get_wrong_counts(limit: int = 30, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
-    res = sb.table("exam_solve_history").select("question_id").eq("user_id", user_id).eq("is_correct", False).execute()
+    res = sb.table("exam_solve_history").select("question_id").eq("user_id", user_id).eq("is_correct", 0).execute()
     count_map = {}
     for row in res.data:
         qid = row["question_id"]

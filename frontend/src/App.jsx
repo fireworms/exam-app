@@ -8,6 +8,7 @@ import Settings from './pages/Settings'
 import Admin from './pages/Admin'
 import EditQuestion from './pages/EditQuestion'
 import Stats from './pages/Stats'
+import SessionReview from './pages/SessionReview'
 import Vocab from './pages/Vocab'
 import Login from './pages/Login'
 import ResetPassword from './pages/ResetPassword'
@@ -42,6 +43,7 @@ export default function App() {
           <Route path="logs" element={<Navigate to="/admin" replace />} />
           <Route path="edit/:question_id" element={<EditQuestion />} />
           <Route path="stats" element={<Stats />} />
+          <Route path="session/:session_id" element={<SessionReview />} />
           <Route path="vocab" element={<Vocab />} />
         </Route>
       </Routes>

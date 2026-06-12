@@ -170,10 +170,12 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 | `GET /api/questions/deeplink` | 딥링크용 단일 문제 |
 | `GET /api/questions/{id}` | 단일 문제 |
 | `POST /api/solve` | 답안 제출 → 정답 확인, 오답노트 처리 |
+| `POST /api/solve/batch` | 답안 일괄 제출 (시험 모드) — 한 요청으로 채점·기록 |
 | `GET /api/wrong-notes` | 오답노트 목록 |
 | `DELETE /api/wrong-notes/{question_id}` | 오답노트 제거 |
 | `PUT /api/wrong-notes/{question_id}/memo` | 오답노트 메모 수정 |
 | `GET /api/scraps` | 스크랩 목록 |
+| `GET /api/scraps/ids` | 스크랩 question_id만 (Quiz 별표 표시용 경량 조회) |
 | `POST /api/scraps/{question_id}` | 스크랩 추가 |
 | `DELETE /api/scraps/{question_id}` | 스크랩 삭제 |
 | `POST /api/reports/{question_id}` | 문제 신고 |
@@ -184,6 +186,7 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 | `DELETE /api/exams/{exam_id}` | 시험 삭제 |
 | `POST /api/sessions` | 세션 시작 |
 | `PUT /api/sessions/{id}/end` | 세션 종료 |
+| `GET /api/sessions/{id}/detail` | 풀이 회차 리뷰 — 세션 정보 + 문제별 풀이 결과 |
 | `GET /api/stats/counts` | 문제 수 카운트 (홈 로딩용) |
 | `GET /api/stats/overview` | 통계 (전체, 과목별, 날짜별) |
 | `GET /api/stats/wrong-counts` | 많이 틀린 문제 목록 (limit=30) |
@@ -227,7 +230,8 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 | `/quiz` | Quiz | 문제 풀기 (랜덤/오답/스크랩/시험 모드) |
 | `/wrong-notes` | WrongNotes | 오답노트 목록 + 메모 |
 | `/scraps` | Scraps | 스크랩 목록 |
-| `/stats` | Stats | 통계 + 많이 틀린 문제 |
+| `/stats` | Stats | 통계 + 많이 틀린 문제 — 세션 행 클릭 시 리뷰 진입 |
+| `/session/:session_id` | SessionReview | 풀이 회차 리뷰 (목록↔상세, 오답만 토글). 시험 직후엔 state로 받아 fetch 없이 표시 |
 | `/admin` | Admin | 관리자 페이지 (비밀번호 게이트) — 업로드/로그/회차관리/신고 탭 |
 | `/edit/:question_id` | EditQuestion | 문제/이미지 수정 |
 | `/vocab` | Vocab | 단어장 목록 (필터·정렬, URL 파라미터 유지) |
@@ -272,6 +276,8 @@ AI 파서가 공통지문 문제를 `(N번 공통지문 문제)` 형태로 마�
 - 학습자료: 별도 앱으로 분리됨 — 이 앱에 없음
 - 홈 성능: 전체 문제 fetch 대신 `/api/stats/counts` count only 사용
 - 선지 선택: 클라이언트 즉시 판정 후 `/api/solve` 백그라운드 전송
+- 시험 모드 제출: 클라이언트 즉시 채점 → 결과 바로 표시, 기록은 `/api/solve/batch` 한 번으로 백그라운드 저장 (문제별 순차 요청 금지 — 서버리스 왕복 N번이라 수십 초 걸림)
+- 공용 컴포넌트: `components/QuestionCard.jsx`(문제+선지 하이라이트 카드 — 오답노트·스크랩·세션리뷰), `utils/format.js`(formatDuration·accColor·sessionLabel 등 — Stats·SessionReview)
 - 문제 풀기: 다음 문제 이동 및 로딩 완료 시 `window.scrollTo(0, 0)` 적용
 - Quiz 신고 버튼: 🚩 버튼 → `POST /api/reports/{id}`, 중복 신고 무시
 - 랜덤 문제: DB 조회 후 `random.shuffle()` 적용 — 미적용 시 ID 순(연도순) 정렬됨

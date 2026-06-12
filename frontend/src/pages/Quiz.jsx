@@ -45,6 +45,10 @@ export default function Quiz() {
   const timerRef = React.useRef(null)
   const totalAnswerTimeRef = React.useRef(0)
   const correctCountRef = React.useRef(0) // stale closure 방지
+  // 시험 모드 자동 제출(시간 만료)은 오래된 클로저에서 불리므로 ref로 최신값 유지
+  const answersRef = React.useRef({})
+  const sessionIdRef = React.useRef(null)
+  const timeLeftRef = React.useRef(timeLimitParam * 60)
   const speaking = useSpeaking()
   // 단어장 모드
   const [vocabMode, setVocabMode] = useState(false)
@@ -89,12 +93,13 @@ export default function Quiz() {
     if (!isExamMode || !timerActive) return
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
+        const next = prev <= 1 ? 0 : prev - 1
+        timeLeftRef.current = next
         if (prev <= 1) {
           clearInterval(timerRef.current)
           submitExam()
-          return 0
         }
-        return prev - 1
+        return next
       })
     }, 1000)
     return () => clearInterval(timerRef.current)
@@ -153,8 +158,16 @@ export default function Quiz() {
     }
   }, [questions.length])
 
+  // 스크랩 별표 표시용 — 화면을 막지 않게 백그라운드로 ID만 가져온다
+  const loadScrapIds = () => {
+    axios.get(`${API}/scraps/ids`)
+      .then(r => setScraps(new Set(r.data)))
+      .catch(e => console.error(e))
+  }
+
   const loadQuestions = async () => {
     setLoading(true)
+    loadScrapIds()
     try {
       const savedKey = sessionStorage.getItem('quiz_key')
       const currentKey = `${mode}_${examId}_${subject}_${examIds}_${examSubjectsParam}_${examQuestionModeParam}`
@@ -162,8 +175,6 @@ export default function Quiz() {
       if (startIndex > 0 && savedKey === currentKey && savedQuestions) {
         const parsed = JSON.parse(savedQuestions)
         setQuestions(parsed)
-        const scrapRes = await axios.get(`${API}/scraps`)
-        setScraps(new Set(scrapRes.data.map(s => s.id)))
         const imageMap = {}
         parsed.forEach(q => { imageMap[q.id] = q.question_image || null })
         setImageUrls(imageMap)
@@ -196,13 +207,10 @@ export default function Quiz() {
       sessionStorage.setItem('quiz_questions', JSON.stringify(res.data))
       sessionStorage.setItem('quiz_key', currentKey)
 
-      const scrapRes = await axios.get(`${API}/scraps`)
-      setScraps(new Set(scrapRes.data.map(s => s.id)))
-
       const imageMap = {}
       res.data.forEach(q => { imageMap[q.id] = q.question_image || null })
       setImageUrls(imageMap)
-      await startSession(res.data)
+      startSession(res.data) // 세션 생성을 기다리지 않고 바로 문제 표시
     } catch (e) {
       console.error(e)
     }
@@ -216,12 +224,16 @@ export default function Quiz() {
     setTimerActive(true)
     totalAnswerTimeRef.current = 0
     correctCountRef.current = 0
+    answersRef.current = {}
+    sessionIdRef.current = null
+    timeLeftRef.current = timeLimitParam * 60
     try {
       const res = await axios.post(`${API}/sessions`, {
         mode, subject: subject || null,
         exam_id: examId ? parseInt(examId) : null,
         total_count: qs.length,
       })
+      sessionIdRef.current = res.data.session_id
       setSessionId(res.data.session_id)
     } catch (e) { console.error(e) }
   }
@@ -276,7 +288,8 @@ export default function Quiz() {
   // ── 시험 모드 ──────────────────────────────────────
 
   const handleExamSelect = (choiceNum) => {
-    setAnswers(prev => ({ ...prev, [questions[current].id]: choiceNum }))
+    answersRef.current = { ...answersRef.current, [questions[current].id]: choiceNum }
+    setAnswers(answersRef.current)
     setSelected(choiceNum)
   }
 
@@ -296,40 +309,65 @@ export default function Quiz() {
     }
   }
 
-  const submitExam = async () => {
+  const submitExam = () => {
     setTimerActive(false)
-    const currentAnswers = answers
+    const currentAnswers = answersRef.current
+    const currentSessionId = sessionIdRef.current
+    // 클라이언트 즉시 채점 — 결과를 바로 표시하고 기록 저장은 백그라운드 배치 전송
     let correct = 0
     const results = []
+    const batchAnswers = []
     for (const q of questions) {
-      const selectedChoice = currentAnswers[q.id]
-      if (selectedChoice == null) continue
-      try {
-        const res = await axios.post(`${API}/solve`, {
-          question_id: q.id,
-          selected_choice: selectedChoice,
-          time_taken: 0,
-          session_id: sessionId,
-        })
-        if (res.data.is_correct) correct++
-        results.push({ question: q, selectedChoice, is_correct: res.data.is_correct })
-      } catch (e) { console.error(e) }
+      const selectedChoice = currentAnswers[q.id] ?? null
+      const is_correct = selectedChoice != null
+        ? !!(q.choices.find(c => c.number === selectedChoice)?.is_correct)
+        : null
+      if (is_correct) correct++
+      results.push({ question: q, selectedChoice, is_correct })
+      if (selectedChoice != null) batchAnswers.push({ question_id: q.id, selected_choice: selectedChoice })
     }
     correctCountRef.current = correct
     setExamResults(results)
     setScore({ correct, total: questions.length })
     setDone(true)
-    const answered = Object.keys(currentAnswers).length
-    const skipped = questions.length - answered
-    try {
-      if (sessionId && sessionStart) {
-        await axios.put(`${API}/sessions/${sessionId}/end`, {
-          correct_count: correct,
-          skipped_count: skipped,
-          duration: timeLimitParam * 60 - timeLeft,
-        })
-      }
-    } catch (e) { console.error(e) }
+
+    const skipped = questions.length - batchAnswers.length
+    const duration = timeLimitParam * 60 - timeLeftRef.current
+    axios.post(`${API}/solve/batch`, { answers: batchAnswers, session_id: currentSessionId })
+      .catch(e => console.error(e))
+    if (currentSessionId) {
+      axios.put(`${API}/sessions/${currentSessionId}/end`, {
+        correct_count: correct,
+        skipped_count: skipped,
+        duration,
+      }).catch(e => console.error(e))
+    }
+  }
+
+  // 시험 직후 리뷰 — 방금 채점한 데이터를 state로 넘겨 fetch 없이 즉시 표시
+  const goExamReview = () => {
+    if (!sessionId) return
+    navigate(`/session/${sessionId}`, {
+      state: {
+        review: {
+          session: {
+            id: sessionId,
+            mode: 'exam',
+            subject: subject || null,
+            total_count: questions.length,
+            correct_count: score.correct,
+            skipped_count: questions.length - examResults.filter(r => r.selectedChoice != null).length,
+            duration: timeLimitParam * 60 - timeLeft,
+            started_at: sessionStart ? new Date(sessionStart).toISOString() : null,
+          },
+          items: examResults.map(r => ({
+            question: r.question,
+            selected_choice: r.selectedChoice,
+            is_correct: r.is_correct,
+          })),
+        },
+      },
+    })
   }
 
   // ── 공통 ──────────────────────────────────────────
@@ -432,32 +470,36 @@ export default function Quiz() {
           {skippedCount > 0 && !isExamMode && <span style={{ marginLeft: 12, fontSize: 14 }}>({skippedCount}문제 건너뜀)</span>}
         </p>
 
-        {/* 시험 모드: 채점 결과 */}
+        {/* 시험 모드: O/X 그리드 — 상세는 리뷰 화면에서 */}
         {isExamMode && examResults.length > 0 && (
-          <div style={{ textAlign: 'left', maxWidth: 600, margin: '0 auto 32px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: 'var(--text2)' }}>채점 결과</h3>
-            {examResults.map(({ question: q, selectedChoice, is_correct }) => (
-              <div key={q.id} style={{
-                background: 'var(--bg2)', border: `1px solid ${is_correct ? 'var(--correct)' : 'var(--wrong)'}`,
-                borderRadius: 8, padding: '12px 16px',
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center',
+            maxWidth: 480, margin: '0 auto 32px',
+          }}>
+            {examResults.map(({ question: q, is_correct }, i) => (
+              <div key={q.id} title={`${q.subject} Q${q.number}`} style={{
+                width: 34, height: 34, borderRadius: 6,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 12, fontWeight: 700, fontFamily: 'JetBrains Mono',
+                background: is_correct ? 'rgba(74,222,128,0.12)' : is_correct === false ? 'rgba(248,113,113,0.12)' : 'var(--bg3)',
+                border: `1px solid ${is_correct ? 'var(--correct)' : is_correct === false ? 'var(--wrong)' : 'var(--border)'}`,
+                color: is_correct ? 'var(--correct)' : is_correct === false ? 'var(--wrong)' : 'var(--text2)',
               }}>
-                <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 4 }}>
-                  {q.subject} · Q{q.number} · {is_correct ? '✓ 정답' : '✗ 오답'}
-                </div>
-                <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-                  {q.question_text.length > 80 ? q.question_text.slice(0, 80) + '...' : q.question_text}
-                </div>
-                {!is_correct && (
-                  <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text2)' }}>
-                    선택: {selectedChoice}번 / 정답: {q.choices.find(c => c.is_correct)?.number}번
-                  </div>
-                )}
+                {i + 1}
               </div>
             ))}
           </div>
         )}
 
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+          {isExamMode && sessionId && (
+            <button onClick={goExamReview} style={{
+              background: 'var(--accent)', color: 'white', padding: '12px 24px',
+              borderRadius: 8, fontWeight: 600,
+            }}>
+              상세 리뷰 →
+            </button>
+          )}
           <button onClick={() => {
             setCurrent(0); setSelected(null); setResult(null)
             setShowExplanation(false); setDone(false)

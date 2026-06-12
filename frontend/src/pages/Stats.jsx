@@ -2,46 +2,41 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from '../axios'
 import API from '../api'
+import { formatDuration, formatTime, formatDate, formatDateTime, accColor, sessionLabel, sessionExamDate } from '../utils/format'
 
-function formatDuration(seconds) {
-  if (!seconds) return '-'
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return m > 0 ? `${m}분 ${s}초` : `${s}초`
-}
+const SESSION_GRID = '72px 1fr 80px 60px 70px 16px'
 
-function formatTime(dateStr) {
-  if (!dateStr) return '-'
-  const d = new Date(dateStr)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return '-'
-  const d = new Date(dateStr)
-  return `${d.getMonth() + 1}/${d.getDate()}`
-}
-
-function accColor(acc) {
-  return acc >= 70 ? 'var(--correct)' : acc >= 50 ? 'var(--scrap)' : 'var(--wrong)'
-}
-
-function SessionRow({ session }) {
-  const answered = (session.total_count - session.skipped_count) || 1
-  const acc = Math.round(session.correct_count / answered * 100)
-  const label = session.subject || (session.mode === 'exam' ? '시험모드' : '전체랜덤')
-  const examDate = session.exam_year
-    ? `${session.exam_year}년 ${session.exam_month ? session.exam_month + '월' : ''}${session.exam_day ? ' ' + session.exam_day + '일' : ''}`
-    : null
+function SessionTableHeader({ showDate }) {
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: '60px 1fr 80px 60px 70px',
-      padding: '10px 16px', borderBottom: '1px solid var(--border)',
-      fontSize: 13, alignItems: 'center', gap: 8,
+      display: 'grid', gridTemplateColumns: SESSION_GRID,
+      padding: '8px 16px', background: 'var(--bg3)',
+      fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', gap: 8,
     }}>
-      <span style={{ color: 'var(--text2)', fontSize: 12 }}>{formatTime(session.started_at)}</span>
+      <span>{showDate ? '일시' : '시각'}</span><span>과목/모드</span>
+      <span style={{ textAlign: 'center' }}>결과</span>
+      <span style={{ textAlign: 'center' }}>정답률</span>
+      <span style={{ textAlign: 'right' }}>소요시간</span>
+      <span></span>
+    </div>
+  )
+}
+
+function SessionRow({ session, showDate, onClick }) {
+  const answered = (session.total_count - session.skipped_count) || 1
+  const acc = Math.round(session.correct_count / answered * 100)
+  const examDate = sessionExamDate(session)
+  return (
+    <div onClick={onClick} style={{
+      display: 'grid', gridTemplateColumns: SESSION_GRID,
+      padding: '10px 16px', borderBottom: '1px solid var(--border)',
+      fontSize: 13, alignItems: 'center', gap: 8, cursor: 'pointer',
+    }}>
+      <span style={{ color: 'var(--text2)', fontSize: 12 }}>
+        {showDate ? formatDateTime(session.started_at) : formatTime(session.started_at)}
+      </span>
       <span style={{ fontWeight: 500 }}>
-        {label}
+        {sessionLabel(session)}
         {examDate && <span style={{ display: 'block', fontSize: 11, color: 'var(--text2)', fontWeight: 400 }}>{examDate}</span>}
       </span>
       <span style={{ textAlign: 'center', color: 'var(--text2)', fontSize: 12 }}>
@@ -55,6 +50,7 @@ function SessionRow({ session }) {
       <span style={{ textAlign: 'right', color: 'var(--text2)', fontFamily: 'JetBrains Mono', fontSize: 12 }}>
         {formatDuration(session.duration)}
       </span>
+      <span style={{ color: 'var(--accent)' }}>›</span>
     </div>
   )
 }
@@ -175,19 +171,10 @@ export default function Stats() {
                       {dayData.accuracy}%
                     </span>
                   </div>
-                  {/* 세션 헤더 */}
-                  <div style={{
-                    display: 'grid', gridTemplateColumns: '60px 1fr 80px 60px 70px',
-                    padding: '8px 16px', background: 'var(--bg3)',
-                    borderTop: '1px solid var(--border)',
-                    fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', gap: 8,
-                  }}>
-                    <span>시각</span><span>과목/모드</span>
-                    <span style={{ textAlign: 'center' }}>결과</span>
-                    <span style={{ textAlign: 'center' }}>정답률</span>
-                    <span style={{ textAlign: 'right' }}>소요시간</span>
-                  </div>
-                  {dayData.sessions.map(s => <SessionRow key={s.id} session={s} />)}
+                  <SessionTableHeader showDate={false} />
+                  {dayData.sessions.map(s => (
+                    <SessionRow key={s.id} session={s} showDate={false} onClick={() => navigate(`/session/${s.id}`)} />
+                  ))}
                 </div>
               )
             })()}
@@ -241,57 +228,10 @@ export default function Stats() {
             border: '1px solid var(--border)', borderRadius: 'var(--radius)',
             overflowX: 'auto', background: 'var(--bg2)', marginBottom: 40,
           }}>
-            <div style={{
-              display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr',
-              minWidth: 480, padding: '10px 20px', background: 'var(--bg3)',
-              borderBottom: '1px solid var(--border)',
-              fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase',
-            }}>
-              <span>일시</span>
-              <span>과목/모드</span>
-              <span style={{ textAlign: 'center' }}>결과</span>
-              <span style={{ textAlign: 'center' }}>정답률</span>
-              <span style={{ textAlign: 'right' }}>소요시간</span>
-            </div>
-            {data.recent_sessions.map(session => {
-              const answered = (session.total_count - session.skipped_count) || 1
-              const accuracy = Math.round(session.correct_count / answered * 100)
-              const modeLabel = session.subject || (session.mode === 'exam' ? '시험모드' : '전체랜덤')
-              const examDate = session.exam_year
-                ? `${session.exam_year}년 ${session.exam_month ? session.exam_month + '월' : ''}${session.exam_day ? ' ' + session.exam_day + '일' : ''}`
-                : null
-              return (
-                <div key={session.id} style={{
-                  display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr',
-                  minWidth: 480, padding: '13px 20px', borderBottom: '1px solid var(--border)',
-                  fontSize: 13, alignItems: 'center',
-                }}>
-                  <span style={{ color: 'var(--text2)', fontSize: 12 }}>
-                    {(() => {
-                      const d = new Date(session.started_at)
-                      return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-                    })()}
-                  </span>
-                  <span style={{ fontWeight: 500 }}>
-                    {modeLabel}
-                    {examDate && <span style={{ display: 'block', fontSize: 11, color: 'var(--text2)', fontWeight: 400 }}>{examDate}</span>}
-                  </span>
-                  <span style={{ textAlign: 'center', color: 'var(--text2)' }}>
-                    {session.correct_count}/{session.total_count}
-                    {session.skipped_count > 0 && <span style={{ fontSize: 11, marginLeft: 4 }}>({session.skipped_count}건너뜀)</span>}
-                  </span>
-                  <span style={{
-                    textAlign: 'center', fontWeight: 700, fontFamily: 'JetBrains Mono',
-                    color: accColor(accuracy),
-                  }}>
-                    {accuracy}%
-                  </span>
-                  <span style={{ textAlign: 'right', color: 'var(--text2)', fontFamily: 'JetBrains Mono', fontSize: 12 }}>
-                    {formatDuration(session.duration)}
-                  </span>
-                </div>
-              )
-            })}
+            <SessionTableHeader showDate />
+            {data.recent_sessions.map(session => (
+              <SessionRow key={session.id} session={session} showDate onClick={() => navigate(`/session/${session.id}`)} />
+            ))}
           </div>
         </>
       )}

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from '../axios'
 import API from '../api'
-import QuestionText from '../components/QuestionText'
+import QuestionCard from '../components/QuestionCard'
 
 export default function Scraps() {
   const [scraps, setScraps] = useState([])
@@ -46,36 +46,16 @@ export default function Scraps() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {scraps.map(q => (
-          <div key={q.id} style={{
-            background: 'var(--bg2)', border: '1px solid var(--border)',
-            borderRadius: 'var(--radius)', padding: '20px',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-              <div style={{ fontSize: 12, color: 'var(--text2)' }}>
-                {q.subject} · {q.year}년 {q.month}월 · Q{q.number}
-              </div>
+          <QuestionCard key={q.id} q={q} maxLength={150}
+            headerRight={
               <button onClick={() => remove(q.id)} style={{
                 background: 'transparent', color: 'var(--text2)', fontSize: 12,
                 border: '1px solid var(--border)', padding: '4px 10px', borderRadius: 6,
               }}>
                 제거
               </button>
-            </div>
-            <div style={{ fontSize: 14, lineHeight: 1.7, marginBottom: 12 }}>
-              <QuestionText text={q.question_text} maxLength={150} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {q.choices.map(c => (
-                <div key={c.id} style={{
-                  fontSize: 13, padding: '6px 10px', borderRadius: 6,
-                  background: c.is_correct ? 'rgba(74,222,128,0.1)' : 'transparent',
-                  color: c.is_correct ? 'var(--correct)' : 'var(--text2)',
-                  border: c.is_correct ? '1px solid rgba(74,222,128,0.3)' : '1px solid transparent',
-                }}>
-                  {c.number}. {c.text}
-                </div>
-              ))}
-            </div>
+            }
+          >
             {q.memo && (
               <div style={{
                 marginTop: 12, padding: '8px 12px', background: 'var(--bg3)',
@@ -84,7 +64,7 @@ export default function Scraps() {
                 📝 {q.memo}
               </div>
             )}
-          </div>
+          </QuestionCard>
         ))}
       </div>
     </div>

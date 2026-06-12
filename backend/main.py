@@ -358,36 +358,82 @@ class SolveRequest(BaseModel):
     session_id: Optional[int] = None
 
 
+class SolveBatchItem(BaseModel):
+    question_id: int
+    selected_choice: int
+    time_taken: Optional[int] = 0
+
+
+class SolveBatchRequest(BaseModel):
+    answers: list[SolveBatchItem]
+    session_id: Optional[int] = None
+
+
+def _record_solves(sb, user_id: str, answers: list[dict], session_id: Optional[int]) -> list:
+    """답안 목록을 일괄 채점·기록. answers: [{question_id, selected_choice, time_taken}]"""
+    q_ids = [a["question_id"] for a in answers]
+    ch_res = sb.table("exam_choices").select("question_id, number, is_correct").in_("question_id", q_ids).execute()
+    correct_map = {(c["question_id"], c["number"]): c["is_correct"] for c in ch_res.data}
+
+    rows, results = [], []
+    for a in answers:
+        key = (a["question_id"], a["selected_choice"])
+        if key not in correct_map:
+            continue
+        is_correct = correct_map[key]
+        rows.append({
+            "user_id": user_id,
+            "question_id": a["question_id"],
+            "selected_choice": a["selected_choice"],
+            "is_correct": is_correct,
+            "time_taken": a.get("time_taken") or 0,
+            "session_id": session_id,
+        })
+        results.append({"question_id": a["question_id"], "is_correct": bool(is_correct)})
+
+    if rows:
+        sb.table("exam_solve_history").insert(rows).execute()
+
+    wrong_ids = [r["question_id"] for r in results if not r["is_correct"]]
+    correct_ids = [r["question_id"] for r in results if r["is_correct"]]
+
+    if wrong_ids:
+        existing = sb.table("exam_wrong_notes").select("question_id").eq("user_id", user_id).in_("question_id", wrong_ids).execute()
+        existing_ids = {e["question_id"] for e in existing.data}
+        new_notes = [{"user_id": user_id, "question_id": qid, "is_dismissed": 0} for qid in wrong_ids if qid not in existing_ids]
+        if new_notes:
+            sb.table("exam_wrong_notes").insert(new_notes).execute()
+        if existing_ids:
+            sb.table("exam_wrong_notes").update({"is_dismissed": 0}).eq("user_id", user_id).in_("question_id", list(existing_ids)).execute()
+
+    if correct_ids:
+        settings_res = sb.table("exam_settings").select("auto_remove_wrong").eq("user_id", user_id).execute()
+        if settings_res.data and settings_res.data[0].get("auto_remove_wrong"):
+            sb.table("exam_wrong_notes").delete().eq("user_id", user_id).in_("question_id", correct_ids).execute()
+
+    return results
+
+
 @api_router.post("/solve")
 def submit_solve(req: SolveRequest, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
-
-    choice_res = sb.table("exam_choices").select("is_correct").eq("question_id", req.question_id).eq("number", req.selected_choice).execute()
-    if not choice_res.data:
-        raise HTTPException(status_code=404, detail="Choice not found")
-    is_correct = choice_res.data[0]["is_correct"]
-
-    sb.table("exam_solve_history").insert({
-        "user_id": user_id,
+    results = _record_solves(sb, user_id, [{
         "question_id": req.question_id,
         "selected_choice": req.selected_choice,
-        "is_correct": is_correct,
-        "time_taken": req.time_taken or 0,
-        "session_id": req.session_id,
-    }).execute()
+        "time_taken": req.time_taken,
+    }], req.session_id)
+    if not results:
+        raise HTTPException(status_code=404, detail="Choice not found")
+    return {"is_correct": results[0]["is_correct"]}
 
-    if not is_correct:
-        existing = sb.table("exam_wrong_notes").select("id, is_dismissed").eq("user_id", user_id).eq("question_id", req.question_id).execute()
-        if not existing.data:
-            sb.table("exam_wrong_notes").insert({"user_id": user_id, "question_id": req.question_id, "is_dismissed": 0}).execute()
-        else:
-            sb.table("exam_wrong_notes").update({"is_dismissed": 0}).eq("user_id", user_id).eq("question_id", req.question_id).execute()
-    else:
-        settings_res = sb.table("exam_settings").select("auto_remove_wrong").eq("user_id", user_id).execute()
-        if settings_res.data and settings_res.data[0].get("auto_remove_wrong"):
-            sb.table("exam_wrong_notes").delete().eq("user_id", user_id).eq("question_id", req.question_id).execute()
 
-    return {"is_correct": bool(is_correct)}
+@api_router.post("/solve/batch")
+def submit_solve_batch(req: SolveBatchRequest, user_id: str = Depends(get_current_user)):
+    if not req.answers:
+        return {"results": []}
+    sb = get_supabase()
+    results = _record_solves(sb, user_id, [a.model_dump() for a in req.answers], req.session_id)
+    return {"results": results}
 
 
 # ─── 오답노트 ─────────────────────────────────────────
@@ -444,6 +490,14 @@ def get_scraps(user_id: str = Depends(get_current_user)):
         q.update(meta.get(q["id"], {}))
     questions.sort(key=lambda q: meta.get(q["id"], {}).get("created_at", ""), reverse=True)
     return questions
+
+
+@api_router.get("/scraps/ids")
+def get_scrap_ids(user_id: str = Depends(get_current_user)):
+    """스크랩한 question_id 목록만 — Quiz의 별표 표시용 경량 조회"""
+    sb = get_supabase()
+    res = sb.table("exam_scraps").select("question_id").eq("user_id", user_id).execute()
+    return [r["question_id"] for r in res.data]
 
 
 @api_router.post("/scraps/{question_id}")
@@ -610,6 +664,38 @@ def end_session(session_id: int, req: SessionEndRequest, user_id: str = Depends(
     return {"success": True}
 
 
+def _flatten_session(s: dict) -> dict:
+    exam_info = s.pop("exam_exams", None) or {}
+    s["exam_year"] = exam_info.get("year")
+    s["exam_month"] = exam_info.get("month")
+    s["exam_day"] = exam_info.get("day")
+    return s
+
+
+@api_router.get("/sessions/{session_id}/detail")
+def get_session_detail(session_id: int, user_id: str = Depends(get_current_user)):
+    """풀이 회차 리뷰 — 세션 정보 + 문제별 풀이 결과"""
+    sb = get_supabase()
+    s_res = sb.table("exam_sessions").select("*, exam_exams(year, month, day)").eq("id", session_id).eq("user_id", user_id).execute()
+    if not s_res.data:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session = _flatten_session(s_res.data[0])
+
+    sh_res = sb.table("exam_solve_history").select("question_id, selected_choice, is_correct, time_taken").eq("user_id", user_id).eq("session_id", session_id).order("id").execute()
+    q_map = {q["id"]: q for q in fetch_questions_by_ids(sb, [r["question_id"] for r in sh_res.data])}
+    items = [
+        {
+            "question": q_map[r["question_id"]],
+            "selected_choice": r["selected_choice"],
+            # DB는 1/0 정수 — 프론트가 true/false/null(미답변)을 구분하므로 bool로 정규화
+            "is_correct": bool(r["is_correct"]),
+            "time_taken": r["time_taken"],
+        }
+        for r in sh_res.data if r["question_id"] in q_map
+    ]
+    return {"session": session, "items": items}
+
+
 # ─── 통계 ────────────────────────────────────────────
 
 @api_router.get("/stats/wrong-counts")
@@ -681,18 +767,12 @@ def get_stats_overview(user_id: str = Depends(get_current_user)):
         del s["total_time"]
         by_subject.append(s)
 
-    sessions_res = sb.table("exam_sessions").select("*, exam_exams(year, month, day)").eq("user_id", user_id).not_.is_("ended_at", "null").not_.in_("mode", ["wrong", "scrap"]).order("started_at", desc=True).limit(20).execute()
-    recent_sessions = []
-    for s in sessions_res.data:
-        exam_info = s.pop("exam_exams", None) or {}
-        s["exam_year"] = exam_info.get("year")
-        s["exam_month"] = exam_info.get("month")
-        s["exam_day"] = exam_info.get("day")
-        recent_sessions.append(s)
+    sessions_res = sb.table("exam_sessions").select("*, exam_exams(year, month, day)").eq("user_id", user_id).not_.is_("ended_at", "null").not_.in_("mode", ["wrong", "scrap"]).order("started_at", desc=True).execute()
+    all_sessions = [_flatten_session(s) for s in sessions_res.data]
+    recent_sessions = all_sessions[:20]
 
-    all_sessions_res = sb.table("exam_sessions").select("*").eq("user_id", user_id).not_.is_("ended_at", "null").not_.in_("mode", ["wrong", "scrap"]).execute()
     by_date_map: dict = {}
-    for s in all_sessions_res.data:
+    for s in all_sessions:
         if not s.get("started_at"):
             continue
         date = s["started_at"][:10]

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from '../axios'
 import API from '../api'
+import QuestionCard from '../components/QuestionCard'
 import { formatDuration, formatTime, formatDate, formatDateTime, accColor, sessionLabel, sessionExamDate } from '../utils/format'
 
 // 좁은 화면(폴드 커버 등)에서는 소요시간 컬럼을 접는다
@@ -71,6 +72,7 @@ export default function Stats() {
   const [loading, setLoading] = useState(true)
   const [selectedDate, setSelectedDate] = useState(null)
   const [wrongCounts, setWrongCounts] = useState([])
+  const [expandedWrong, setExpandedWrong] = useState(null) // 펼친 문제 id
 
   useEffect(() => {
     axios.get(`${API}/stats/overview`)
@@ -263,7 +265,7 @@ export default function Stats() {
             background: 'var(--bg2)', marginBottom: 40, overflow: 'hidden',
           }}>
             <div style={{
-              display: 'grid', gridTemplateColumns: '40px 1fr 80px 60px',
+              display: 'grid', gridTemplateColumns: '40px 1fr 70px 20px',
               padding: '10px 16px', background: 'var(--bg3)',
               borderBottom: '1px solid var(--border)',
               fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', gap: 8,
@@ -274,31 +276,37 @@ export default function Stats() {
               <span></span>
             </div>
             {wrongCounts.map((q, i) => (
-              <div key={q.id} style={{
-                display: 'grid', gridTemplateColumns: '40px 1fr 80px 60px',
-                padding: '12px 16px', borderBottom: '1px solid var(--border)',
-                fontSize: 13, alignItems: 'center', gap: 8,
-              }}>
-                <span style={{ textAlign: 'center', fontWeight: 700, color: 'var(--text2)', fontSize: 12 }}>{i + 1}</span>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 2 }}>
-                    {q.subject} · {q.year}년 {q.month}월 · Q{q.number}
+              <div key={q.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                <div
+                  onClick={() => setExpandedWrong(prev => prev === q.id ? null : q.id)}
+                  style={{
+                    display: 'grid', gridTemplateColumns: '40px 1fr 70px 20px',
+                    padding: '12px 16px', fontSize: 13, alignItems: 'center', gap: 8, cursor: 'pointer',
+                  }}
+                >
+                  <span style={{ textAlign: 'center', fontWeight: 700, color: 'var(--text2)', fontSize: 12 }}>{i + 1}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 2 }}>
+                      {q.subject} · {q.year}년 {q.month}월 · Q{q.number}
+                    </div>
+                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>
+                      {q.question_text?.slice(0, 60)}{q.question_text?.length > 60 ? '…' : ''}
+                    </div>
                   </div>
-                  <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>
-                    {q.question_text?.slice(0, 60)}{q.question_text?.length > 60 ? '…' : ''}
-                  </div>
+                  <span style={{
+                    textAlign: 'center', fontWeight: 700, fontFamily: 'JetBrains Mono',
+                    color: q.wrong_count >= 5 ? 'var(--wrong)' : q.wrong_count >= 3 ? 'var(--scrap)' : 'var(--text)',
+                  }}>
+                    {q.wrong_count}회
+                  </span>
+                  <span style={{ color: 'var(--accent)' }}>{expandedWrong === q.id ? '⌄' : '›'}</span>
                 </div>
-                <span style={{
-                  textAlign: 'center', fontWeight: 700, fontFamily: 'JetBrains Mono',
-                  color: q.wrong_count >= 5 ? 'var(--wrong)' : q.wrong_count >= 3 ? 'var(--scrap)' : 'var(--text)',
-                }}>
-                  {q.wrong_count}회
-                </span>
-                <button onClick={() => navigate(`/edit/${q.id}`)} style={{
-                  background: 'var(--bg3)', border: '1px solid var(--border)',
-                  borderRadius: 6, padding: '4px 10px', fontSize: 12,
-                  color: 'var(--text2)', cursor: 'pointer',
-                }}>편집</button>
+                {/* 펼치면 문제 전문 + 해설 */}
+                {expandedWrong === q.id && (
+                  <div style={{ padding: '0 12px 12px' }}>
+                    <QuestionCard q={q} showImage showExplanation wrongCount={q.wrong_count} />
+                  </div>
+                )}
               </div>
             ))}
           </div>

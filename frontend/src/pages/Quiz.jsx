@@ -546,13 +546,13 @@ export default function Quiz() {
   return (
     <div>
       {/* 헤더 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontFamily: 'JetBrains Mono', color: 'var(--accent)', fontWeight: 600 }}>
             {current + 1}
           </span>
           <span style={{ color: 'var(--text2)' }}>/ {questions.length}</span>
-          <div style={{ height: 4, width: 120, background: 'var(--bg3)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ height: 4, width: 'clamp(44px, 16vw, 120px)', background: 'var(--bg3)', borderRadius: 2, overflow: 'hidden' }}>
             <div style={{
               height: '100%',
               width: `${(isExamMode ? answeredCount : (current + 1)) / questions.length * 100}%`,
@@ -612,14 +612,14 @@ export default function Quiz() {
         </div>
       </div>
 
-      {/* 키보드 힌트 */}
+      {/* 키보드 힌트 — 터치 기기에서는 CSS로 숨김 */}
       {!isExamMode && (
-        <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 12, opacity: 0.6 }}>
+        <div className="kb-hint" style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 12, opacity: 0.6 }}>
           1~{q.choices.length} 선택 · Enter 다음/건너뛰기
         </div>
       )}
       {isExamMode && (
-        <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 12, opacity: 0.6 }}>
+        <div className="kb-hint" style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 12, opacity: 0.6 }}>
           1~{q.choices.length} 선택 · ←→ 이동
         </div>
       )}

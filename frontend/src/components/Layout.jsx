@@ -179,7 +179,7 @@ export default function Layout() {
 
           .content {
             margin-left: 0;
-            padding: 16px 16px 80px;
+            padding: 16px 16px calc(80px + env(safe-area-inset-bottom));
             margin-top: 52px;
             max-width: 100%;
           }
@@ -188,7 +188,8 @@ export default function Layout() {
             display: flex;
             position: fixed;
             bottom: 0; left: 0; right: 0;
-            height: 60px;
+            height: calc(60px + env(safe-area-inset-bottom));
+            padding-bottom: env(safe-area-inset-bottom);
             background: var(--bg2);
             border-top: 1px solid var(--border);
             z-index: 100;

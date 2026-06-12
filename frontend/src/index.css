@@ -52,6 +52,17 @@ button {
   outline: none;
 }
 
+/* 모바일 터치: 탭 시 회색 하이라이트 제거, 더블탭 줌 방지 */
+button, a {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* 터치 기기에서는 키보드 단축키 안내 숨김 */
+@media (pointer: coarse) {
+  .kb-hint { display: none; }
+}
+
 a { text-decoration: none; color: inherit; }
 
 ::-webkit-scrollbar { width: 6px; }

@@ -94,8 +94,8 @@ export default function ResetPassword() {
 }
 
 const s = {
-  wrap: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg, #0f0f0f)' },
-  card: { background: 'var(--surface, #1a1a1a)', borderRadius: 16, padding: '40px 36px', width: 360, boxShadow: '0 8px 32px rgba(0,0,0,0.4)' },
+  wrap: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg, #0f0f0f)', padding: 16 },
+  card: { background: 'var(--surface, #1a1a1a)', borderRadius: 16, padding: '40px 28px', width: '100%', maxWidth: 360, boxShadow: '0 8px 32px rgba(0,0,0,0.4)' },
   title: { textAlign: 'center', marginBottom: 24, fontSize: 20, color: 'var(--text, #fff)' },
   form: { display: 'flex', flexDirection: 'column', gap: 10 },
   input: { padding: '12px 14px', borderRadius: 8, border: '1px solid var(--border, #333)', background: 'var(--bg, #0f0f0f)', color: 'var(--text, #fff)', fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box' },

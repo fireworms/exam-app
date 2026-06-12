@@ -4,19 +4,30 @@ import axios from '../axios'
 import API from '../api'
 import { formatDuration, formatTime, formatDate, formatDateTime, accColor, sessionLabel, sessionExamDate } from '../utils/format'
 
-const SESSION_GRID = '72px 1fr 80px 60px 70px 16px'
+// 좁은 화면(폴드 커버 등)에서는 소요시간 컬럼을 접는다
+const SESSION_GRID_CSS = `
+  .session-grid {
+    display: grid;
+    grid-template-columns: 72px 1fr 80px 60px 70px 16px;
+    gap: 8px;
+    align-items: center;
+  }
+  @media (max-width: 520px) {
+    .session-grid { grid-template-columns: 58px 1fr 60px 44px 14px; gap: 6px; }
+    .session-grid .sg-dur { display: none; }
+  }
+`
 
 function SessionTableHeader({ showDate }) {
   return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: SESSION_GRID,
+    <div className="session-grid" style={{
       padding: '8px 16px', background: 'var(--bg3)',
-      fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', gap: 8,
+      fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase',
     }}>
       <span>{showDate ? '일시' : '시각'}</span><span>과목/모드</span>
       <span style={{ textAlign: 'center' }}>결과</span>
       <span style={{ textAlign: 'center' }}>정답률</span>
-      <span style={{ textAlign: 'right' }}>소요시간</span>
+      <span className="sg-dur" style={{ textAlign: 'right' }}>소요시간</span>
       <span></span>
     </div>
   )
@@ -27,10 +38,9 @@ function SessionRow({ session, showDate, onClick }) {
   const acc = Math.round(session.correct_count / answered * 100)
   const examDate = sessionExamDate(session)
   return (
-    <div onClick={onClick} style={{
-      display: 'grid', gridTemplateColumns: SESSION_GRID,
+    <div className="session-grid" onClick={onClick} style={{
       padding: '10px 16px', borderBottom: '1px solid var(--border)',
-      fontSize: 13, alignItems: 'center', gap: 8, cursor: 'pointer',
+      fontSize: 13, cursor: 'pointer',
     }}>
       <span style={{ color: 'var(--text2)', fontSize: 12 }}>
         {showDate ? formatDateTime(session.started_at) : formatTime(session.started_at)}
@@ -47,7 +57,7 @@ function SessionRow({ session, showDate, onClick }) {
         textAlign: 'center', fontWeight: 700, fontFamily: 'JetBrains Mono',
         color: accColor(acc),
       }}>{acc}%</span>
-      <span style={{ textAlign: 'right', color: 'var(--text2)', fontFamily: 'JetBrains Mono', fontSize: 12 }}>
+      <span className="sg-dur" style={{ textAlign: 'right', color: 'var(--text2)', fontFamily: 'JetBrains Mono', fontSize: 12 }}>
         {formatDuration(session.duration)}
       </span>
       <span style={{ color: 'var(--accent)' }}>›</span>
@@ -79,6 +89,7 @@ export default function Stats() {
 
   return (
     <div>
+      <style>{SESSION_GRID_CSS}</style>
       <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 8 }}>통계</h1>
       <p style={{ color: 'var(--text2)', marginBottom: 32 }}>풀이 현황을 한눈에 확인하세요</p>
 

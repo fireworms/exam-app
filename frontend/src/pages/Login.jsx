@@ -149,8 +149,8 @@ export default function Login() {
 }
 
 const s = {
-  wrap: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg, #0f0f0f)' },
-  card: { background: 'var(--surface, #1a1a1a)', borderRadius: 16, padding: '40px 36px', width: 360, boxShadow: '0 8px 32px rgba(0,0,0,0.4)' },
+  wrap: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg, #0f0f0f)', padding: 16 },
+  card: { background: 'var(--surface, #1a1a1a)', borderRadius: 16, padding: '40px 28px', width: '100%', maxWidth: 360, boxShadow: '0 8px 32px rgba(0,0,0,0.4)' },
   title: { textAlign: 'center', marginBottom: 24, fontSize: 22, color: 'var(--text, #fff)' },
   tabs: { display: 'flex', marginBottom: 24, background: 'var(--bg, #0f0f0f)', borderRadius: 8, padding: 4, gap: 4 },
   tab: { flex: 1, padding: '8px 0', border: 'none', borderRadius: 6, background: 'transparent', cursor: 'pointer', color: 'var(--text-muted, #888)', fontSize: 14 },

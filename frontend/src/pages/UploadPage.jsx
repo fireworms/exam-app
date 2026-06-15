@@ -105,7 +105,16 @@ export default function UploadPage() {
           prev.map((i) => (i.name === item.name ? { ...i, status: "done", result: data } : i))
         );
       } catch (e) {
-        const msg = e.response?.data?.detail || e.message || "서버 오류";
+        const detail = e.response?.data?.detail;
+        let msg;
+        if (Array.isArray(detail)) {
+          // FastAPI 422 검증 오류: 어느 필드가 틀렸는지 사람이 읽을 수 있게 변환
+          msg = detail
+            .map((d) => `${(d.loc || []).filter((p) => p !== "body").join(".")}: ${d.msg}`)
+            .join(" / ");
+        } else {
+          msg = detail || e.message || "서버 오류";
+        }
         setJsonItems((prev) =>
           prev.map((i) => (i.name === item.name ? { ...i, status: "error", error: msg } : i))
         );

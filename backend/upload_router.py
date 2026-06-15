@@ -7,7 +7,7 @@ import base64
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import List, Optional
 from google import genai
 from google.genai import types
@@ -273,6 +273,23 @@ class QuestionItem(BaseModel):
     question_text: str
     choices: List[ChoiceItem]
     explanation: Optional[str] = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data):
+        """대체 형식 변환: id→number, passage+question→question_text.
+        category·answer 등 불필요 필드는 extra=ignore로 자동 무시."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        if "number" not in data and "id" in data:
+            data["number"] = data["id"]
+        if "question_text" not in data:
+            passage = (data.get("passage") or "").strip()
+            question = (data.get("question") or "").strip()
+            if passage or question:
+                data["question_text"] = f"{passage}\n\n{question}".strip()
+        return data
 
 
 class ExamMeta(BaseModel):

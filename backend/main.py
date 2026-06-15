@@ -202,12 +202,22 @@ def fetch_questions_by_ids(sb, ids: list) -> list:
 @api_router.get("/subjects")
 def get_subjects(user_id: str = Depends(get_current_user)):
     sb = get_supabase()
-    res = sb.table("exam_questions").select("id, exam_exams!inner(subject)").execute()
-    counts = {}
-    for q in res.data:
-        subj = (q.get("exam_exams") or {}).get("subject", "")
-        if subj:
-            counts[subj] = counts.get(subj, 0) + 1
+    # exam_id→subject 맵 (exam_exams는 작은 테이블)
+    exams = sb.table("exam_exams").select("id, subject").execute().data
+    exam_subj = {e["id"]: (e.get("subject") or "") for e in exams}
+    # exam_questions는 1000행 단위로 페이지네이션해 전수 집계
+    # (.execute() 단발 조회는 PostgREST 기본 1000행 제한에 걸려 누락됨)
+    counts: dict = {}
+    start, PAGE = 0, 1000
+    while True:
+        rows = sb.table("exam_questions").select("exam_id").range(start, start + PAGE - 1).execute().data
+        for q in rows:
+            subj = exam_subj.get(q.get("exam_id"), "")
+            if subj:
+                counts[subj] = counts.get(subj, 0) + 1
+        if len(rows) < PAGE:
+            break
+        start += PAGE
     return [{"subject": s, "count": c} for s, c in sorted(counts.items())]
 
 

@@ -16,6 +16,7 @@ export default function Layout() {
   async function logout() {
     await supabase.auth.signOut()
     localStorage.removeItem('exam_user')
+    sessionStorage.removeItem('_adm')  // 관리자 잠금 해제 (다음 로그인 시 비번 재입력)
     navigate('/login')
   }
 

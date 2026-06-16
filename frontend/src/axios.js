@@ -11,8 +11,11 @@ const tokenReady = supabase.auth.getSession().then(({ data: { session } }) => {
 })
 
 // 토큰 변경 시 캐시 업데이트
-supabase.auth.onAuthStateChange((_event, session) => {
+supabase.auth.onAuthStateChange((event, session) => {
   currentToken = session?.access_token || null
+  if (event === 'SIGNED_OUT') {
+    sessionStorage.removeItem('_adm')  // 로그아웃/만료 시 관리자 잠금 해제
+  }
   if (!session && !window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/reset-password')) {
     window.location.href = '/login'
   }

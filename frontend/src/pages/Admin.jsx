@@ -6,8 +6,6 @@ import { EditQuestionContent } from './EditQuestion'
 import axios from '../axios'
 import API from '../api'
 
-const ADMIN_PW = '1234rla' // 변경하세요
-
 function ReportsList() {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
@@ -212,6 +210,7 @@ const TABS = [
   { id: 'exams', label: '회차 관리' },
   { id: 'edit', label: '문제 편집' },
   { id: 'reports', label: '신고' },
+  { id: 'password', label: '비밀번호' },
 ]
 
 export default function Admin() {
@@ -219,18 +218,29 @@ export default function Admin() {
   const [unlocked, setUnlocked] = useState(() => sessionStorage.getItem('_adm') === '1')
   const [input, setInput] = useState('')
   const [err, setErr] = useState(false)
+  const [checking, setChecking] = useState(false)
 
   const rawTab = searchParams.get('tab') || (isLocal ? 'upload' : 'exams')
   const tab = (!isLocal && (rawTab === 'upload' || rawTab === 'logs')) ? 'exams' : rawTab
   const setTab = (id) => setSearchParams({ tab: id })
 
-  const tryUnlock = () => {
-    if (input === ADMIN_PW) {
-      sessionStorage.setItem('_adm', '1')
-      setUnlocked(true)
-    } else {
+  const tryUnlock = async () => {
+    if (checking || !input) return
+    setChecking(true)
+    try {
+      const { data } = await axios.post(`${API}/admin/verify`, { password: input })
+      if (data.ok) {
+        sessionStorage.setItem('_adm', '1')
+        setUnlocked(true)
+      } else {
+        setErr(true)
+        setInput('')
+      }
+    } catch {
       setErr(true)
       setInput('')
+    } finally {
+      setChecking(false)
     }
   }
 
@@ -253,10 +263,11 @@ export default function Admin() {
           }}
         />
         {err && <div style={{ color: 'var(--wrong)', fontSize: 13, marginBottom: 8 }}>비밀번호가 틀렸어요</div>}
-        <button onClick={tryUnlock} style={{
+        <button onClick={tryUnlock} disabled={checking} style={{
           width: '100%', padding: '10px', background: 'var(--accent)',
-          color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 700, cursor: 'pointer',
-        }}>확인</button>
+          color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 700,
+          cursor: checking ? 'default' : 'pointer', opacity: checking ? 0.6 : 1,
+        }}>{checking ? '확인 중...' : '확인'}</button>
       </div>
     )
   }
@@ -286,6 +297,55 @@ export default function Admin() {
       {tab === 'exams' && <ExamManager />}
       {tab === 'edit' && <QuestionBrowser />}
       {tab === 'reports' && <ReportsList />}
+      {tab === 'password' && <PasswordChange />}
+    </div>
+  )
+}
+
+function PasswordChange() {
+  const [cur, setCur] = useState('')
+  const [next, setNext] = useState('')
+  const [next2, setNext2] = useState('')
+  const [msg, setMsg] = useState(null) // { ok, text }
+  const [saving, setSaving] = useState(false)
+
+  const submit = async () => {
+    if (saving) return
+    if (next !== next2) { setMsg({ ok: false, text: '새 비밀번호가 일치하지 않아요' }); return }
+    if (next.length < 4) { setMsg({ ok: false, text: '새 비밀번호는 4자 이상이어야 해요' }); return }
+    setSaving(true); setMsg(null)
+    try {
+      await axios.post(`${API}/admin/password`, { current: cur, new: next })
+      setMsg({ ok: true, text: '비밀번호가 변경됐어요' })
+      setCur(''); setNext(''); setNext2('')
+    } catch (e) {
+      setMsg({ ok: false, text: e?.response?.data?.detail || '변경에 실패했어요' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const inputStyle = {
+    width: '100%', boxSizing: 'border-box', padding: '10px 14px', fontSize: 15,
+    border: '1px solid var(--border)', borderRadius: 8,
+    background: 'var(--bg2)', color: 'var(--text)', marginBottom: 10, outline: 'none',
+  }
+
+  return (
+    <div style={{ maxWidth: 360 }}>
+      <p style={{ color: 'var(--text2)', fontSize: 13, marginTop: 0, marginBottom: 16 }}>
+        관리자 페이지 잠금 비밀번호를 변경해요
+      </p>
+      <input type="password" value={cur} onChange={e => setCur(e.target.value)} placeholder="현재 비밀번호" style={inputStyle} />
+      <input type="password" value={next} onChange={e => setNext(e.target.value)} placeholder="새 비밀번호 (4자 이상)" style={inputStyle} />
+      <input type="password" value={next2} onChange={e => setNext2(e.target.value)} placeholder="새 비밀번호 확인"
+        onKeyDown={e => e.key === 'Enter' && submit()} style={inputStyle} />
+      {msg && <div style={{ color: msg.ok ? 'var(--correct)' : 'var(--wrong)', fontSize: 13, marginBottom: 10 }}>{msg.text}</div>}
+      <button onClick={submit} disabled={saving} style={{
+        width: '100%', padding: '10px', background: 'var(--accent)', color: '#fff',
+        border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 700,
+        cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
+      }}>{saving ? '변경 중...' : '변경'}</button>
     </div>
   )
 }

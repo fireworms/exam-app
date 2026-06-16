@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 import random
+import hashlib
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
@@ -610,6 +611,57 @@ def update_settings(req: SettingsRequest, user_id: str = Depends(get_current_use
         "updated_at": now_kst(),
     }).eq("user_id", user_id).execute()
     return {"success": True}
+
+
+# ─── 관리자 비밀번호 ──────────────────────────────────
+# 비번은 exam_admin 테이블에 sha256 해시로 1행 저장(서비스키만 접근, RLS deny).
+# 프론트 번들에 평문이 박히지 않도록 서버에서만 검증한다.
+
+_ADMIN_PW_FALLBACK = "1234rla"  # exam_admin 행이 없을 때 최초 부트스트랩용
+
+
+def _hash_pw(pw: str) -> str:
+    return hashlib.sha256(pw.encode()).hexdigest()
+
+
+def _admin_hash(sb) -> str:
+    """저장된 관리자 비번 해시. 행이 없으면 fallback을 시드 후 반환.
+    테이블 자체가 아직 없으면(배포 직후 SQL 미실행) fallback 해시로 동작."""
+    try:
+        res = sb.table("exam_admin").select("password_hash").eq("id", 1).execute()
+    except Exception:
+        return _hash_pw(_ADMIN_PW_FALLBACK)
+    if res.data:
+        return res.data[0]["password_hash"]
+    h = _hash_pw(_ADMIN_PW_FALLBACK)
+    sb.table("exam_admin").insert({"id": 1, "password_hash": h}).execute()
+    return h
+
+
+class AdminVerifyRequest(BaseModel):
+    password: str
+
+
+class AdminPwChangeRequest(BaseModel):
+    current: str
+    new: str
+
+
+@api_router.post("/admin/verify")
+def admin_verify(req: AdminVerifyRequest, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    return {"ok": _hash_pw(req.password) == _admin_hash(sb)}
+
+
+@api_router.post("/admin/password")
+def admin_change_password(req: AdminPwChangeRequest, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    if _hash_pw(req.current) != _admin_hash(sb):
+        raise HTTPException(status_code=403, detail="현재 비밀번호가 틀렸어요")
+    if len(req.new) < 4:
+        raise HTTPException(status_code=400, detail="새 비밀번호는 4자 이상이어야 해요")
+    sb.table("exam_admin").update({"password_hash": _hash_pw(req.new)}).eq("id", 1).execute()
+    return {"ok": True}
 
 
 # ─── 시험 목록 ────────────────────────────────────────

@@ -621,10 +621,17 @@ def get_exams(user_id: str = Depends(get_current_user)):
     exam_ids = [e["id"] for e in exams_res.data]
     if not exam_ids:
         return []
-    counts_res = sb.table("exam_questions").select("exam_id").in_("exam_id", exam_ids).execute()
-    count_map = {}
-    for q in counts_res.data:
-        count_map[q["exam_id"]] = count_map.get(q["exam_id"], 0) + 1
+    # exam_questions는 1000행 단위로 페이지네이션해 전수 집계
+    # (.execute() 단발 조회는 PostgREST 기본 1000행 제한에 걸려 누락됨)
+    count_map: dict = {}
+    start, PAGE = 0, 1000
+    while True:
+        rows = sb.table("exam_questions").select("exam_id").range(start, start + PAGE - 1).execute().data
+        for q in rows:
+            count_map[q["exam_id"]] = count_map.get(q["exam_id"], 0) + 1
+        if len(rows) < PAGE:
+            break
+        start += PAGE
     for exam in exams_res.data:
         exam["question_count"] = count_map.get(exam["id"], 0)
     return exams_res.data

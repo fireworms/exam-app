@@ -98,6 +98,7 @@ export function ExamManager() {
   const [loading, setLoading] = useState(true);
   const [confirmId, setConfirmId] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [subjectFilter, setSubjectFilter] = useState("");
 
   const fetchExams = async () => {
     try {
@@ -127,12 +128,35 @@ export function ExamManager() {
 
   const confirmExam = exams.find(e => e.id === confirmId);
 
+  const subjects = [...new Set(exams.map(e => e.subject).filter(Boolean))].sort();
+  const visibleExams = subjectFilter ? exams.filter(e => e.subject === subjectFilter) : exams;
+
   return (
     <>
       <div style={styles.subHeader}>
         <p style={styles.subtitle}>회차를 삭제하면 문제·오답노트·스크랩·풀이 기록이 모두 삭제돼요</p>
         <button style={styles.refreshBtn} onClick={fetchExams}>새로고침</button>
       </div>
+
+      {!loading && exams.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+          <button
+            style={subjectFilter === "" ? styles.subjectChipOn : styles.subjectChip}
+            onClick={() => setSubjectFilter("")}
+          >
+            전체 ({exams.length})
+          </button>
+          {subjects.map(s => (
+            <button
+              key={s}
+              style={subjectFilter === s ? styles.subjectChipOn : styles.subjectChip}
+              onClick={() => setSubjectFilter(s)}
+            >
+              {s} ({exams.filter(e => e.subject === s).length})
+            </button>
+          ))}
+        </div>
+      )}
 
       {loading ? (
         <div style={styles.center}>불러오는 중...</div>
@@ -149,7 +173,7 @@ export function ExamManager() {
             <span style={{ flex: 1, textAlign: "center" }}>문제 수</span>
             <span style={{ flex: 1, textAlign: "center" }}>삭제</span>
           </div>
-          {exams.map((exam) => {
+          {visibleExams.map((exam) => {
             const label = [exam.year && `${exam.year}년`, exam.month && `${exam.month}월`, exam.day && `${exam.day}일`].filter(Boolean).join(" ");
             const meta = [exam.grade, exam.region, exam.subject].filter(Boolean).join(" · ");
             return (
@@ -281,6 +305,26 @@ const styles = {
     cursor: "pointer",
     fontSize: 13,
     color: "#475569",
+    fontWeight: 600,
+  },
+  subjectChip: {
+    background: "#f1f5f9",
+    border: "1px solid #e2e8f0",
+    borderRadius: 16,
+    padding: "5px 12px",
+    cursor: "pointer",
+    fontSize: 13,
+    color: "#475569",
+    fontWeight: 600,
+  },
+  subjectChipOn: {
+    background: "#2563eb",
+    border: "1px solid #2563eb",
+    borderRadius: 16,
+    padding: "5px 12px",
+    cursor: "pointer",
+    fontSize: 13,
+    color: "#fff",
     fontWeight: 600,
   },
   center: { textAlign: "center", padding: 60, color: "#94a3b8" },

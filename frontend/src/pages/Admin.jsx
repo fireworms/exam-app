@@ -6,7 +6,7 @@ import { EditQuestionContent } from './EditQuestion'
 import axios from '../axios'
 import API from '../api'
 
-const ADMIN_PW = '1234' // 변경하세요
+const ADMIN_PW = '1234rla' // 변경하세요
 
 function ReportsList() {
   const [reports, setReports] = useState([])

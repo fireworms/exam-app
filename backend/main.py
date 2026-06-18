@@ -266,34 +266,43 @@ def get_random_questions(
 @api_router.get("/questions/exam-mode")
 def get_exam_mode_questions(
     subjects: str,
-    question_mode: str = "random",
+    selections: Optional[str] = None,  # 과목별 선택: 'random'|'by_exam'|exam_id, subjects와 평행
     user_id: str = Depends(get_current_user),
 ):
     sb = get_supabase()
     subject_list = [s.strip() for s in subjects.split(",") if s.strip()]
+    sel_list = [s.strip() for s in selections.split(",")] if selections else []
     all_questions = []
+    used_exams: dict[str, list] = {}  # 'by_exam' 중복 회차 방지
 
-    if question_mode == "by_exam":
-        used_exams: dict[str, list] = {}
-        for subject in subject_list:
+    def exam_questions(exam_id):
+        ids_res = sb.table("exam_questions").select("id").eq("exam_id", exam_id).order("number").execute()
+        qs = fetch_questions_by_ids(sb, [r["id"] for r in ids_res.data])
+        qs.sort(key=lambda q: q.get("number") or 0)
+        return qs
+
+    for i, subject in enumerate(subject_list):
+        sel = sel_list[i] if i < len(sel_list) else "random"
+
+        if sel.isdigit():
+            # 특정 회차 지정
+            all_questions.extend(exam_questions(int(sel)))
+        elif sel == "by_exam":
+            # 과목 내 회차 1개 랜덤 (이미 뽑은 회차는 제외)
             used = used_exams.setdefault(subject, [])
             exams_q = sb.table("exam_exams").select("id").eq("subject", subject)
             if used:
                 exams_q = exams_q.not_.in_("id", used)
-            exams_res = exams_q.execute()
-            rows = exams_res.data
+            rows = exams_q.execute().data
             if not rows:
-                exams_res = sb.table("exam_exams").select("id").eq("subject", subject).execute()
-                rows = exams_res.data
+                rows = sb.table("exam_exams").select("id").eq("subject", subject).execute().data
             if not rows:
                 continue
             exam_id = random.choice(rows)["id"]
             used.append(exam_id)
-            ids_res = sb.table("exam_questions").select("id").eq("exam_id", exam_id).order("number").execute()
-            qs = fetch_questions_by_ids(sb, [r["id"] for r in ids_res.data])
-            all_questions.extend(qs)
-    else:
-        for subject in subject_list:
+            all_questions.extend(exam_questions(exam_id))
+        else:
+            # 완전 랜덤 — 과목 내 20문제
             ids_res = sb.table("exam_questions").select("id, exam_exams!inner(subject)").eq("exam_exams.subject", subject).execute()
             ids = [r["id"] for r in ids_res.data]
             if not ids:

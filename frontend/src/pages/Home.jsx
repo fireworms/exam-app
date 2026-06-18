@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import axios from '../axios'
 import API from '../api'
+import { examDateLabel } from '../utils/format'
 
 const EXAM_TEMPLATES = ['국어', '영어', '한국사', '컴퓨터일반', '정보보호론']
 
@@ -15,7 +16,8 @@ export default function Home() {
   const [stats, setStats] = useState({ total: 0, wrong: 0, scrap: 0 })
   const [showExamOptions, setShowExamOptions] = useState(false)
   const [examSubjects, setExamSubjects] = useState([...EXAM_TEMPLATES])
-  const [examQuestionMode, setExamQuestionMode] = useState('random')
+  // 과목별 선택값: 'random'(완전 랜덤) | 'by_exam'(회차 랜덤) | String(exam_id)(회차 지정), examSubjects와 평행
+  const [examSelections, setExamSelections] = useState(EXAM_TEMPLATES.map(() => 'random'))
   const [examTimeLimit, setExamTimeLimit] = useState(100)
   const [examTimeLimitEdited, setExamTimeLimitEdited] = useState(false)
   const navigate = useNavigate()
@@ -33,6 +35,19 @@ export default function Home() {
   useEffect(() => {
     if (!examTimeLimitEdited) setExamTimeLimit(examSubjects.length * 20)
   }, [examSubjects.length, examTimeLimitEdited])
+
+  const examsForSubject = (sub) => exams
+    .filter(e => e.subject === sub)
+    .sort((a, b) => (b.year - a.year) || (b.month - a.month) || (b.day - a.day))
+
+  // examSubjects/exams 변화 시 과목별 선택값 동기화 (과목에 없는 회차 지정은 완전 랜덤으로 복귀)
+  useEffect(() => {
+    setExamSelections(prev => examSubjects.map((sub, i) => {
+      const cur = prev[i] || 'random'
+      if (cur === 'random' || cur === 'by_exam') return cur
+      return examsForSubject(sub).some(e => String(e.id) === cur) ? cur : 'random'
+    }))
+  }, [examSubjects, exams])
 
   const startQuiz = (mode) => navigate(`/quiz?mode=${mode}`)
 
@@ -166,7 +181,7 @@ export default function Home() {
               <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 과목 선택 ({examSubjects.length}/5)
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
                 {examSubjects.map((sub, idx) => (
                   <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     <select
@@ -181,6 +196,27 @@ export default function Home() {
                       {[...new Set([...EXAM_TEMPLATES, ...subjects.map(s => s.subject)])].map(s => (
                         <option key={s} value={s}>{s}</option>
                       ))}
+                    </select>
+                    <select
+                      value={examSelections[idx] || 'random'}
+                      onChange={e => {
+                        const next = [...examSelections]
+                        next[idx] = e.target.value
+                        setExamSelections(next)
+                      }}
+                      style={{ ...selStyle, flex: 1, minWidth: 140 }}
+                    >
+                      <optgroup label="랜덤">
+                        <option value="random">완전 랜덤 (20문제)</option>
+                        <option value="by_exam">회차 랜덤</option>
+                      </optgroup>
+                      {examsForSubject(sub).length > 0 && (
+                        <optgroup label="회차 지정">
+                          {examsForSubject(sub).map(e => (
+                            <option key={e.id} value={String(e.id)}>{examDateLabel(e, { region: true })}</option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                     <button
                       onClick={() => setExamSubjects(prev => prev.filter((_, i) => i !== idx))}
@@ -202,40 +238,12 @@ export default function Home() {
                       setExamSubjects(prev => [...prev, available[0] || '국어'])
                     }}
                     style={{
-                      padding: '5px 12px', borderRadius: 6, fontSize: 13,
+                      padding: '7px 12px', borderRadius: 6, fontSize: 13, alignSelf: 'flex-start',
                       background: 'var(--bg3)', border: '1px dashed var(--border)',
                       color: 'var(--text2)', cursor: 'pointer',
                     }}
                   >+ 과목 추가</button>
                 )}
-              </div>
-            </div>
-
-            {/* 문제 방식 */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                문제 방식
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {[
-                  { val: 'random', label: '완전 랜덤', desc: '과목 내 20문제 랜덤' },
-                  { val: 'by_exam', label: '회차 랜덤', desc: '과목별 회차 1개를 랜덤 선택' },
-                ].map(opt => (
-                  <button
-                    key={opt.val}
-                    onClick={() => setExamQuestionMode(opt.val)}
-                    style={{
-                      padding: '8px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
-                      textAlign: 'left', transition: 'all 0.15s',
-                      background: examQuestionMode === opt.val ? 'rgba(99,102,241,0.12)' : 'var(--bg3)',
-                      border: `1px solid ${examQuestionMode === opt.val ? 'var(--accent)' : 'var(--border)'}`,
-                      color: examQuestionMode === opt.val ? 'var(--accent)' : 'var(--text2)',
-                    }}
-                  >
-                    <div style={{ fontWeight: 600 }}>{opt.label}</div>
-                    <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>{opt.desc}</div>
-                  </button>
-                ))}
               </div>
             </div>
 
@@ -269,7 +277,11 @@ export default function Home() {
                 )}
               </div>
               <button
-                onClick={() => navigate(`/quiz?mode=exam&time_limit=${examTimeLimit}&subjects=${encodeURIComponent(examSubjects.join(','))}&question_mode=${examQuestionMode}`)}
+                onClick={() => navigate(
+                  `/quiz?mode=exam&time_limit=${examTimeLimit}` +
+                  `&subjects=${encodeURIComponent(examSubjects.join(','))}` +
+                  `&selections=${encodeURIComponent(examSelections.join(','))}`
+                )}
                 style={{
                   background: 'var(--accent)', color: 'white',
                   padding: '9px 24px', borderRadius: 8, fontSize: 14, fontWeight: 600,
@@ -393,7 +405,7 @@ export default function Home() {
                     onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
                   >
                     <div>
-                      <span style={{ fontWeight: 600 }}>{exam.year}년 {exam.month}월 {exam.day}일</span>
+                      <span style={{ fontWeight: 600 }}>{examDateLabel(exam)}</span>
                       <span style={{ color: 'var(--text2)', marginLeft: 10, fontSize: 13 }}>
                         {[exam.grade, exam.region].filter(Boolean).join(' · ')}
                       </span>

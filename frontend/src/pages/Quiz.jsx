@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import axios from '../axios'
 import API from '../api'
 import QuestionText from '../components/QuestionText'
+import ExamNavigator from '../components/ExamNavigator'
 import { speak, useSpeaking } from '../tts'
 
 export default function Quiz() {
@@ -17,7 +18,7 @@ export default function Quiz() {
   const deeplinkQuestionNo = searchParams.get('questionNo')
   const examIds = searchParams.get('exam_ids')
   const examSubjectsParam = searchParams.get('subjects')
-  const examQuestionModeParam = searchParams.get('question_mode') || 'random'
+  const examSelectionsParam = searchParams.get('selections') || ''
   const startIndex = parseInt(searchParams.get('q') || '0')
   const timeLimitParam = parseInt(searchParams.get('time_limit') || '0') // 분 단위, 0=무제한
   const isExamMode = timeLimitParam > 0
@@ -38,6 +39,7 @@ export default function Quiz() {
   const [sessionStart, setSessionStart] = useState(null)
   const [skippedCount, setSkippedCount] = useState(0)
   const [skippedIds, setSkippedIds] = useState([]) // 건너뛴 문제 ID 목록
+  const [showNav, setShowNav] = useState(false) // 시험 모드 문제 네비게이터
   const [elapsed, setElapsed] = useState(0)
   const [timerActive, setTimerActive] = useState(false)
   // 시험 모드: 남은 시간(초)
@@ -170,7 +172,7 @@ export default function Quiz() {
     loadScrapIds()
     try {
       const savedKey = sessionStorage.getItem('quiz_key')
-      const currentKey = `${mode}_${examId}_${subject}_${examIds}_${examSubjectsParam}_${examQuestionModeParam}`
+      const currentKey = `${mode}_${examId}_${subject}_${examIds}_${examSubjectsParam}_${examSelectionsParam}`
       const savedQuestions = sessionStorage.getItem('quiz_questions')
       if (startIndex > 0 && savedKey === currentKey && savedQuestions) {
         const parsed = JSON.parse(savedQuestions)
@@ -194,7 +196,7 @@ export default function Quiz() {
         res = await axios.get(`${API}/questions/by_ids`, { params: { ids: skippedMode } })
       } else if (examSubjectsParam) {
         res = await axios.get(`${API}/questions/exam-mode`, {
-          params: { subjects: examSubjectsParam, question_mode: examQuestionModeParam }
+          params: { subjects: examSubjectsParam, selections: examSelectionsParam || undefined }
         })
       } else if (examId) {
         res = await axios.get(`${API}/questions`, { params: { exam_id: examId } })
@@ -311,6 +313,22 @@ export default function Quiz() {
       setSelected(answers[questions[current - 1]?.id] ?? null)
       window.scrollTo(0, 0)
     }
+  }
+
+  const goToQuestion = (idx) => {
+    setCurrent(idx)
+    setSelected(answers[questions[idx]?.id] ?? null)
+    window.scrollTo(0, 0)
+  }
+
+  // 미답변 확인 후 제출 (시험 모드)
+  const handleSubmitClick = () => {
+    const unanswered = questions.length - Object.keys(answersRef.current).length
+    if (unanswered > 0 &&
+        !window.confirm(`아직 답하지 않은 문제가 ${unanswered}개 있어요.\n그래도 제출할까요?`)) {
+      return
+    }
+    submitExam()
   }
 
   const submitExam = () => {
@@ -603,6 +621,16 @@ export default function Quiz() {
         )}
 
         <div style={{ display: 'flex', gap: 8 }}>
+          {isExamMode && (
+            <button onClick={() => setShowNav(p => !p)} style={{
+              background: showNav ? 'var(--accent)' : 'var(--bg3)',
+              color: showNav ? 'white' : 'var(--text2)',
+              padding: '6px 12px', borderRadius: 6, fontSize: 13,
+              border: '1px solid var(--border)', transition: 'all 0.15s',
+            }}>
+              📋 문제
+            </button>
+          )}
           {!isExamMode && (
             <button onClick={() => navigate(`/edit/${q.id}?return=${returnUrl}`)}
               style={{ background: 'var(--bg3)', color: 'var(--text2)', padding: '6px 12px', borderRadius: 6, fontSize: 13, border: '1px solid var(--border)' }}>
@@ -626,6 +654,17 @@ export default function Quiz() {
           </button>
         </div>
       </div>
+
+      {/* 시험 모드 문제 네비게이터 */}
+      {isExamMode && showNav && (
+        <ExamNavigator
+          questions={questions}
+          answers={answers}
+          current={current}
+          onJump={(idx) => { goToQuestion(idx); setShowNav(false) }}
+          onSubmit={handleSubmitClick}
+        />
+      )}
 
       {/* 키보드 힌트 — 터치 기기에서는 CSS로 숨김 */}
       {!isExamMode && (
@@ -936,7 +975,7 @@ export default function Quiz() {
               다음 →
             </button>
           ) : (
-            <button onClick={submitExam} style={{
+            <button onClick={handleSubmitClick} style={{
               flex: 1,
               background: answeredCount === questions.length ? 'var(--correct)' : 'var(--accent)',
               color: 'white', padding: '14px', borderRadius: 8, fontSize: 15, fontWeight: 600,

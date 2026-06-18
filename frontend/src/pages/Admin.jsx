@@ -5,6 +5,7 @@ import { UploadLogs, ExamManager } from './LogsPage'
 import { EditQuestionContent } from './EditQuestion'
 import axios from '../axios'
 import API from '../api'
+import { examDateLabel } from '../utils/format'
 
 function ReportsList() {
   const [reports, setReports] = useState([])
@@ -159,7 +160,7 @@ function QuestionBrowser() {
             <option value="">선택</option>
             {filteredExams.map(e => (
               <option key={e.id} value={e.id}>
-                {e.year}년 {e.month}월{e.day ? ` ${e.day}일` : ''}{e.grade ? ` ${e.grade}` : ''}{e.region ? ` ${e.region}` : ''} ({e.question_count}문제)
+                {examDateLabel(e, { grade: true, region: true })} ({e.question_count}문제)
               </option>
             ))}
           </select>

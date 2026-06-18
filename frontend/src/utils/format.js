@@ -33,6 +33,16 @@ export function sessionLabel(session) {
   return session.subject || (session.mode === 'exam' ? '시험모드' : '전체랜덤')
 }
 
+// 시험 회차 날짜 라벨: "2024년 6월 15일" (+옵션: grade·region)
+export function examDateLabel(exam, { day = true, grade = false, region = false } = {}) {
+  if (!exam) return ''
+  const parts = [`${exam.year}년`, `${exam.month}월`]
+  if (day && exam.day) parts.push(`${exam.day}일`)
+  if (grade && exam.grade) parts.push(exam.grade)
+  if (region && exam.region) parts.push(exam.region)
+  return parts.join(' ')
+}
+
 // 세션이 특정 회차 풀이인 경우 시험 날짜 라벨
 export function sessionExamDate(session) {
   if (!session.exam_year) return null

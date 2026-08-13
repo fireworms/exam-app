@@ -4,6 +4,7 @@ import json
 import time
 import threading
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from fastapi.responses import JSONResponse
@@ -108,33 +109,94 @@ PARSE_PROMPT = """이 시험지를 분석해서 모든 문제를 파싱해주세
 - 각 오답 선지가 왜 틀렸는지도 전문가 수준으로 설명해주세요
 """
 
+CLAUDE_CHUNK_SIZE = 20  # 한 번의 요청에서 파싱할 문제 수
 
-def parse_with_claude(pdf_bytes: bytes) -> dict:
+
+def _render_pdf_images(pdf_bytes: bytes) -> list:
+    """PDF 각 페이지를 2x PNG로 렌더링해 content 블록 리스트로 반환.
+    청크마다 재사용하므로 렌더링은 파일당 1회만 수행한다."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    content = []
+    images = []
     for page in doc:
         pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
         img_b64 = base64.standard_b64encode(pix.tobytes("png")).decode()
-        content.append({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": img_b64}})
+        images.append({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": img_b64}})
     doc.close()
-    content.append({"type": "text", "text": PARSE_PROMPT})
-    # max_tokens가 크면 non-streaming은 HTTP 타임아웃에 걸리므로 반드시 스트리밍 사용
-    with claude_client.messages.stream(
-        model="claude-sonnet-4-6", max_tokens=64000,
-        messages=[{"role": "user", "content": content}]
-    ) as stream:
-        response = stream.get_final_message()
-    if response.stop_reason == "max_tokens":
-        raise Exception(
-            f"응답이 max_tokens에서 잘림 (출력 {response.usage.output_tokens} 토큰). "
-            "문제 수가 많으면 시험지를 나눠서 업로드하세요."
-        )
-    raw = next(b.text for b in response.content if b.type == "text").strip()
+    return images
+
+
+def _extract_json(raw: str) -> dict:
+    raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
     return json.loads(raw.strip())
+
+
+def _claude_chunk(images: list, start: int, end: int) -> dict:
+    """시험지 전체 이미지를 보여주되 start~end번 문제만 파싱하도록 요청."""
+    prompt = (
+        PARSE_PROMPT
+        + f"\n\n**이번 요청에서는 {start}번부터 {end}번까지의 문제만 파싱하세요.**\n"
+        "- 그 범위 밖 문제는 questions 배열에 넣지 마세요 (지문 참조용으로만 보세요)\n"
+        f"- {start}번보다 앞 번호 문제의 공통지문을 참조해야 하면 해당 지문을 question_text에 그대로 포함하세요\n"
+        "- exam 객체에 이 시험지의 전체 문제 수를 total_questions 정수로 반드시 포함하세요\n"
+        "- 해당 범위에 문제가 없으면 questions를 빈 배열로 반환하세요\n"
+    )
+    content = images + [{"type": "text", "text": prompt}]
+    # max_tokens가 크면 non-streaming은 HTTP 타임아웃에 걸리므로 반드시 스트리밍 사용
+    with claude_client.messages.stream(
+        model="claude-sonnet-4-6", max_tokens=32000,
+        messages=[{"role": "user", "content": content}]
+    ) as stream:
+        response = stream.get_final_message()
+    if response.stop_reason == "max_tokens":
+        raise Exception(
+            f"{start}~{end}번 응답이 max_tokens에서 잘림 "
+            f"(출력 {response.usage.output_tokens} 토큰). CLAUDE_CHUNK_SIZE를 줄이세요."
+        )
+    return _extract_json(next(b.text for b in response.content if b.type == "text"))
+
+
+def parse_with_claude(pdf_bytes: bytes) -> dict:
+    """문제를 CLAUDE_CHUNK_SIZE개씩 나눠 파싱한 뒤 병합.
+    한 번에 60문제+해설을 뽑으면 출력 한도에 걸려 JSON이 잘리므로 분할한다."""
+    images = _render_pdf_images(pdf_bytes)
+
+    # 1차 청크에서 exam 메타데이터와 전체 문제 수를 함께 얻는다
+    first = _claude_chunk(images, 1, CLAUDE_CHUNK_SIZE)
+    exam = first.get("exam") or {}
+    questions = list(first.get("questions") or [])
+    total = exam.pop("total_questions", None)
+    if not isinstance(total, int) or total <= 0:
+        total = len(questions)
+
+    # 나머지 청크는 병렬 처리
+    ranges = [
+        (s, min(s + CLAUDE_CHUNK_SIZE - 1, total))
+        for s in range(CLAUDE_CHUNK_SIZE + 1, total + 1, CLAUDE_CHUNK_SIZE)
+    ]
+    if ranges:
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = [pool.submit(_claude_chunk, images, s, e) for s, e in ranges]
+            for fut in futures:
+                chunk = fut.result()  # 청크 하나라도 실패하면 전체 실패
+                questions.extend(chunk.get("questions") or [])
+
+    # 번호 기준 중복 제거 후 정렬 (청크 경계에서 중복 파싱될 수 있음)
+    merged = {}
+    for q in questions:
+        num = q.get("number")
+        if num is not None and num not in merged:
+            merged[num] = q
+    questions = [merged[n] for n in sorted(merged)]
+
+    if total and len(questions) < total:
+        missing = sorted(set(range(1, total + 1)) - set(merged))
+        raise Exception(f"문제 누락: {total}문제 중 {len(questions)}개만 파싱됨 (누락 번호: {missing})")
+
+    return {"exam": exam, "questions": questions}
 
 
 def parse_with_gemini(pdf_bytes: bytes) -> dict:

@@ -118,11 +118,18 @@ def parse_with_claude(pdf_bytes: bytes) -> dict:
         content.append({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": img_b64}})
     doc.close()
     content.append({"type": "text", "text": PARSE_PROMPT})
-    response = claude_client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=16000,
+    # max_tokens가 크면 non-streaming은 HTTP 타임아웃에 걸리므로 반드시 스트리밍 사용
+    with claude_client.messages.stream(
+        model="claude-sonnet-4-6", max_tokens=64000,
         messages=[{"role": "user", "content": content}]
-    )
-    raw = response.content[0].text.strip()
+    ) as stream:
+        response = stream.get_final_message()
+    if response.stop_reason == "max_tokens":
+        raise Exception(
+            f"응답이 max_tokens에서 잘림 (출력 {response.usage.output_tokens} 토큰). "
+            "문제 수가 많으면 시험지를 나눠서 업로드하세요."
+        )
+    raw = next(b.text for b in response.content if b.type == "text").strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -236,9 +243,8 @@ def background_parse(log_id: int, pdf_path: str, exam_info: dict, source_file: s
         update_log(log_id, "done", exam_id=exam_id)
         os.remove(pdf_path)
     except Exception as e:
+        # 실패 시 임시 PDF는 남겨둔다 — 재업로드 없이 재파싱 가능하도록
         update_log(log_id, "failed", error_msg=str(e))
-        if os.path.exists(pdf_path):
-            os.remove(pdf_path)
 
 
 # ── 모델 ─────────────────────────────────────────────

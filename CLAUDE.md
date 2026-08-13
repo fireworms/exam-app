@@ -81,6 +81,9 @@ exam_choices        선지
 
 exam_upload_logs    업로드 진행 상태
   id, source_file, status(pending→processing→done|failed), error_msg, exam_id
+
+exam_admin          관리자 비밀번호 (1행, RLS deny — 서비스키만 접근)
+  id(=1), password_hash(sha256)
 ```
 
 **유저별 (user_id UUID → auth.users):**
@@ -181,6 +184,8 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 | `POST /api/reports/{question_id}` | 문제 신고 |
 | `DELETE /api/reports/{question_id}` | 신고 취소 |
 | `GET /api/reports` | 전체 신고 목록 (관리자용) |
+| `POST /api/admin/verify` | 관리자 비밀번호 검증 |
+| `POST /api/admin/password` | 관리자 비밀번호 변경 |
 | `GET/PUT /api/settings` | 설정 조회/수정 |
 | `GET /api/exams` | 시험 목록 |
 | `DELETE /api/exams/{exam_id}` | 시험 삭제 |
@@ -244,8 +249,10 @@ PC(768px+): `body { zoom: 1.25 }`
 
 ### 관리자 페이지 (`/admin`)
 
-- `Admin.jsx` 상단 `ADMIN_PW` 상수로 비밀번호 변경 (기본값 `'1234'`)
-- sessionStorage `_adm` 키로 세션 내 잠금 유지
+- 비밀번호는 DB `exam_admin` 테이블에 sha256 해시로 1행 저장 (서비스키만 접근, RLS deny) — 프론트 번들에 평문 없음
+- 검증: `POST /api/admin/verify` / 변경: `POST /api/admin/password` (현재 비번 확인 후, 4자 이상) — 관리자 탭 내 비번 변경 UI 제공
+- `exam_admin` 행이 없으면 `main.py`의 `_ADMIN_PW_FALLBACK`으로 자동 시드 (최초 부트스트랩용)
+- sessionStorage `_adm` 키로 세션 내 잠금 유지, 로그아웃 시 해제
 - 신고 목록: 모든 유저의 신고 표시, 편집/해제 버튼 제공
 - **업로드·로그 탭**: `localhost`, `127.0.0.1`, `192.168.50.102` 접속 시에만 표시 (Vercel 외부 접근 시 숨김)
 
@@ -273,6 +280,9 @@ AI 파서가 공통지문 문제를 `(N번 공통지문 문제)` 형태로 마�
 ## 기타
 
 - **인증 없을 때 응답**: `auth.py`에서 `Header(None)` 사용 — 헤더 없으면 422 아닌 401 반환
+- **Claude 파서(`parse_with_claude`)는 스트리밍 필수** — `max_tokens=64000`. 문제 수·해설이 많으면 16k 토큰을 넘겨 응답 JSON이 잘리고 `Unterminated string` 에러가 남. sonnet-4-6은 128K 출력을 지원하지만 ~16K 초과 시 non-streaming은 HTTP 타임아웃에 걸리므로 `messages.stream()` + `get_final_message()` 사용. `stop_reason == "max_tokens"`면 잘린 JSON 파싱 대신 명시적 에러
+- **파싱 실패 시 임시 PDF는 삭제하지 않음** — `background_parse`의 except 절에서 지우면 재업로드 없이는 재시도 불가. 성공 시에만 삭제
+- **파싱은 daemon 스레드** — 백엔드 프로세스가 죽으면 같이 사라지고 로그가 `processing`에 영구히 멈춤. 장시간 파싱은 서버와 분리된 프로세스로 돌릴 것
 - **`exam_solve_history.is_correct`는 integer 컬럼** — supabase-py `.eq("is_correct", False)`는 postgrest 22P02 에러(invalid input for integer). 반드시 `0`/`1`로 비교할 것
 - 누적 오답 횟수(`wrong_count`): `_wrong_counts()` 헬퍼 — solve 응답·오답노트·세션 리뷰에 표시 ("N회 틀림" 뱃지는 `QuestionCard`)
 - 학습자료: 별도 앱으로 분리됨 — 이 앱에 없음

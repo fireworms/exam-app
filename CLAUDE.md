@@ -289,7 +289,8 @@ AI 파서가 공통지문 문제를 `(N번 공통지문 문제)` 형태로 마�
 - 홈 성능: 전체 문제 fetch 대신 `/api/stats/counts` count only 사용
 - 선지 선택: 클라이언트 즉시 판정 후 `/api/solve` 백그라운드 전송
 - 시험 모드 제출: 클라이언트 즉시 채점 → 결과 바로 표시, 기록은 `/api/solve/batch` 한 번으로 백그라운드 저장 (문제별 순차 요청 금지 — 서버리스 왕복 N번이라 수십 초 걸림)
-- 공용 컴포넌트: `components/QuestionCard.jsx`(문제+선지 하이라이트 카드 — 오답노트·스크랩·세션리뷰), `utils/format.js`(formatDuration·accColor·sessionLabel 등 — Stats·SessionReview)
+- 공용 컴포넌트: `components/QuestionCard.jsx`(문제+선지 하이라이트 카드 — 오답노트·스크랩·세션리뷰), `components/SelectOrInput.jsx`(목록 선택+직접입력 겸용 필드 — 업로드 폼 과목·등급·지역), `utils/format.js`(formatDuration·accColor·sessionLabel 등 — Stats·SessionReview)
+- 업로드 폼 과목·등급·지역은 고정 목록이 아님 — `SelectOrInput`의 `✏️ 직접입력`으로 새 값 등록 가능. 과목은 `/api/subjects`로 DB 등록분을 목록에 자동 병합(등급·지역은 전용 경량 엔드포인트가 없어 정적 목록만)
 - 문제 풀기: 다음 문제 이동 및 로딩 완료 시 `window.scrollTo(0, 0)` 적용
 - Quiz 신고 버튼: 🚩 버튼 → `POST /api/reports/{id}`, 중복 신고 무시
 - 랜덤 문제: DB 조회 후 `random.shuffle()` 적용 — 미적용 시 ID 순(연도순) 정렬됨

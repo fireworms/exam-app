@@ -1,6 +1,7 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import API from '../api';
 import axiosInstance from '../axios';
+import SelectOrInput from '../components/SelectOrInput';
 
 const JSON_FORMAT_TEMPLATE = `{
   "exam": {
@@ -44,6 +45,18 @@ const REGIONS = [
 
 export default function UploadPage() {
   const [tab, setTab] = useState("pdf");
+
+  // 기본 과목 목록 + DB에 이미 등록된 과목(직접입력으로 추가한 것 포함)
+  const [subjects, setSubjects] = useState(SUBJECTS);
+  useEffect(() => {
+    axiosInstance
+      .get(`${API}/subjects`)
+      .then(({ data }) => {
+        const extra = (data || []).map((s) => s.subject).filter((s) => s && !SUBJECTS.includes(s));
+        if (extra.length) setSubjects([...SUBJECTS, ...extra.sort()]);
+      })
+      .catch(() => {}); // 실패해도 기본 목록으로 동작
+  }, []);
 
   // PDF 탭 상태
   const [files, setFiles] = useState([]);
@@ -438,44 +451,38 @@ export default function UploadPage() {
                   <div style={styles.formGrid}>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>과목</label>
-                      <select
-                        style={styles.select}
+                      <SelectOrInput
                         value={f.parsed.subject}
-                        onChange={(e) => updateField(idx, "subject", e.target.value)}
-                      >
-                        <option value="">-- 선택 --</option>
-                        {SUBJECTS.map((s) => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
-                      </select>
+                        onChange={(v) => updateField(idx, "subject", v)}
+                        options={subjects}
+                        placeholder="과목명 입력"
+                        selectStyle={styles.select}
+                        inputStyle={styles.input}
+                      />
                     </div>
 
                     <div style={styles.formGroup}>
                       <label style={styles.label}>등급</label>
-                      <select
-                        style={styles.select}
+                      <SelectOrInput
                         value={f.parsed.grade}
-                        onChange={(e) => updateField(idx, "grade", e.target.value)}
-                      >
-                        <option value="">-- 선택 --</option>
-                        {GRADES.map((g) => (
-                          <option key={g} value={g}>{g}</option>
-                        ))}
-                      </select>
+                        onChange={(v) => updateField(idx, "grade", v)}
+                        options={GRADES}
+                        placeholder="등급 입력"
+                        selectStyle={styles.select}
+                        inputStyle={styles.input}
+                      />
                     </div>
 
                     <div style={styles.formGroup}>
                       <label style={styles.label}>지역/종류</label>
-                      <select
-                        style={styles.select}
+                      <SelectOrInput
                         value={f.parsed.region}
-                        onChange={(e) => updateField(idx, "region", e.target.value)}
-                      >
-                        <option value="">-- 선택 --</option>
-                        {REGIONS.map((r) => (
-                          <option key={r} value={r}>{r}</option>
-                        ))}
-                      </select>
+                        onChange={(v) => updateField(idx, "region", v)}
+                        options={REGIONS}
+                        placeholder="지역/종류 입력"
+                        selectStyle={styles.select}
+                        inputStyle={styles.input}
+                      />
                     </div>
 
                     <div style={styles.formGroup}>

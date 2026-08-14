@@ -120,6 +120,7 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 - **환경변수**: Vercel 대시보드 또는 `vercel env add/rm` — `SUPABASE_SERVICE_KEY`는 Supabase 대시보드의 service_role **JWT** 키 사용 (`sb_secret_` 포맷 아님)
 - `api/index.py` + `pyproject.toml` — Vercel이 `backend.main:app` 로드. `upload_router`는 `VERCEL=1` 환경변수로 자동 제외
 - `backend/main.py` 상단 `sys.path.insert` — Vercel에서 sibling 모듈 임포트 보장
+- **`vercel.json`에 `rewrites`를 추가하지 말 것** — `pyproject.toml`의 `[tool.vercel] entrypoint`로 FastAPI 함수가 루트 전체를 담당하고, `main.py`가 이미 `/assets` StaticFiles 마운트 + SPA 캐치올을 처리한다. 과거 `/(.*) → /index.html` 캐치올이 정적 파일보다 먼저 매칭돼 JS/CSS 자리에 HTML이 반환되며 `Failed to load module script ... MIME type "text/html"` 흰 화면 발생, `/api/:path* → /api/index`도 존재하지 않는 목적지라 API 요청까지 캐치올로 흘러 HTML을 반환했음 (로컬은 정상이라 재현 안 됨). 증상 확인: `curl -sI <prod>/assets/index-*.js`의 `content-type`이 `text/html`이면 이 문제
 
 ### ⚠️ Supabase 싱글톤 주의
 

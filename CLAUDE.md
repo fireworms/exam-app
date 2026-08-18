@@ -51,9 +51,10 @@ nohup uvicorn main:app --host 0.0.0.0 --port 8008 > /tmp/backend.log 2>&1 &
 |------|------|
 | `backend/main.py` | 메인 앱 + 대부분 엔드포인트 |
 | `backend/auth.py` | JWT 검증, `get_current_user` |
-| `backend/db.py` | `get_supabase()`, `_new_auth_client()` |
+| `backend/db.py` | `get_supabase()`, `_new_auth_client()`, `db_exec()` (전송 오류 재시도) |
 | `backend/upload_router.py` | PDF/JSON 업로드 (`/api/upload`) |
 | `backend/edit_router.py` | 문제 편집/이미지 (`/api/questions`) |
+| `backend/exam_ops.py` | `delete_exam_cascade()` — 회차 삭제 (엔드포인트·업로드 롤백 공용) |
 | `backend/vocab_router.py` | 단어장 (`/api/vocab`) |
 | `backend/images/` | 문제 이미지 로컬 캐시 (레거시, 실제 서빙은 Storage) |
 | `api/index.py` | Vercel 서버리스 진입점 (`backend.main:app` 로드) |
@@ -284,6 +285,8 @@ AI 파서가 공통지문 문제를 `(N번 공통지문 문제)` 형태로 마�
 - **Claude 파서(`parse_with_claude`)는 스트리밍 필수** — `max_tokens=64000`. 문제 수·해설이 많으면 16k 토큰을 넘겨 응답 JSON이 잘리고 `Unterminated string` 에러가 남. sonnet-4-6은 128K 출력을 지원하지만 ~16K 초과 시 non-streaming은 HTTP 타임아웃에 걸리므로 `messages.stream()` + `get_final_message()` 사용. `stop_reason == "max_tokens"`면 잘린 JSON 파싱 대신 명시적 에러
 - **파싱 실패 시 임시 PDF는 삭제하지 않음** — `background_parse`의 except 절에서 지우면 재업로드 없이는 재시도 불가. 성공 시에만 삭제
 - **파싱은 daemon 스레드** — 백엔드 프로세스가 죽으면 같이 사라지고 로그가 `processing`에 영구히 멈춤. 장시간 파싱은 서버와 분리된 프로세스로 돌릴 것
+- **DB 호출은 `db_exec()`로 감쌀 것** — 싱글톤이 들고 있던 유휴 keep-alive 커넥션을 Supabase가 먼저 끊으면 재사용 시 `httpx.RemoteProtocolError: Server disconnected`가 난다. postgrest 내장 재시도는 GET/HEAD가 503/520 **응답**을 받은 경우만 다뤄 이 전송 계층 오류를 못 잡는다. `db.py`에서 `keepalive_expiry=5초`로 유휴 커넥션 재사용을 막고, `db_exec()`가 `httpx.TransportError`를 지수 백오프로 재시도한다
+- **`save_to_db`는 일괄 삽입** — 문제마다 왕복하면 60문제에 121번이라 중간에 끊길 때 반쪽 회차가 남았다. 문제 1회 + 선지 1회로 묶고, 반환 순서 대신 `number`로 선지를 매핑한다. `background_parse`는 저장 중 실패 시 `delete_exam_cascade()`로 롤백하되 저장 성공 후 뒷정리 실패와는 경로를 분리한다
 - **`exam_solve_history.is_correct`는 integer 컬럼** — supabase-py `.eq("is_correct", False)`는 postgrest 22P02 에러(invalid input for integer). 반드시 `0`/`1`로 비교할 것
 - 누적 오답 횟수(`wrong_count`): `_wrong_counts()` 헬퍼 — solve 응답·오답노트·세션 리뷰에 표시 ("N회 틀림" 뱃지는 `QuestionCard`)
 - 학습자료: 별도 앱으로 분리됨 — 이 앱에 없음

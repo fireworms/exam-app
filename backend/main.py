@@ -27,6 +27,7 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 from supabase import create_client as _create_supabase_client
 from db import get_supabase
+from exam_ops import delete_exam_cascade
 from auth import get_current_user
 
 def _new_auth_client():
@@ -705,19 +706,7 @@ def delete_exam(exam_id: int, user_id: str = Depends(get_current_user)):
     if not exam_res.data:
         raise HTTPException(status_code=404, detail="Exam not found")
 
-    q_res = sb.table("exam_questions").select("id").eq("exam_id", exam_id).execute()
-    q_ids = [q["id"] for q in q_res.data]
-
-    if q_ids:
-        sb.table("exam_solve_history").delete().in_("question_id", q_ids).execute()
-        sb.table("exam_wrong_notes").delete().in_("question_id", q_ids).execute()
-        sb.table("exam_scraps").delete().in_("question_id", q_ids).execute()
-        sb.table("exam_choices").delete().in_("question_id", q_ids).execute()
-        sb.table("exam_questions").delete().in_("id", q_ids).execute()
-
-    sb.table("exam_sessions").delete().eq("exam_id", exam_id).execute()
-    sb.table("exam_upload_logs").delete().eq("exam_id", exam_id).execute()
-    sb.table("exam_exams").delete().eq("id", exam_id).execute()
+    delete_exam_cascade(exam_id, delete_logs=True)
     return {"ok": True}
 
 

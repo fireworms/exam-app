@@ -15,7 +15,8 @@ from google.genai import types
 import anthropic
 import fitz
 from dotenv import load_dotenv
-from db import get_supabase
+from db import get_supabase, db_exec
+from exam_ops import delete_exam_cascade
 from auth import get_current_user
 
 KST = timezone(timedelta(hours=9))
@@ -253,60 +254,94 @@ def _resolve_shared_passages(questions: list) -> list:
     return result
 
 
-def save_to_db(exam_info: dict, data: dict, source_file: str) -> int:
+def save_to_db(exam_info: dict, data: dict, source_file: str, created: dict = None) -> int:
+    """회차·문제·선지를 일괄 삽입한다.
+
+    문제마다 왕복하면 60문제 기준 121번이라 중간에 커넥션이 끊길 때
+    반쪽 회차가 남는다. 문제 1회 + 선지 1회로 묶어 노출을 줄인다.
+    """
     sb = get_supabase()
-    exam_res = sb.table("exam_exams").insert({
+    exam_res = db_exec(sb.table("exam_exams").insert({
         "year": exam_info["year"], "month": exam_info["month"], "day": exam_info["day"],
         "subject": exam_info["subject"], "grade": exam_info["grade"],
         "region": exam_info.get("region", ""), "source_file": source_file,
-    }).execute()
+    }))
     exam_id = exam_res.data[0]["id"]
+    if created is not None:
+        created["exam_id"] = exam_id   # 이후 단계가 실패해도 롤백할 수 있도록
 
     questions_list = data.get("questions", data) if isinstance(data, dict) else data
     questions_list = _resolve_shared_passages(questions_list)
+
+    rows, choices_by_number = [], {}
     for i, q in enumerate(questions_list):
         number = q.get("number") or q.get("question_number") or q.get("no") or (i + 1)
-        question_text = q.get("question_text") or q.get("question") or q.get("text") or ""
-        explanation = q.get("explanation") or q.get("해설") or ""
-        q_res = sb.table("exam_questions").insert({
+        rows.append({
             "exam_id": exam_id, "number": number,
-            "question_text": question_text, "explanation": explanation,
-        }).execute()
-        q_id = q_res.data[0]["id"]
-        choices = []
-        for j, choice in enumerate(q.get("choices", [])):
-            choices.append({
-                "question_id": q_id,
-                "number": choice.get("number") or choice.get("no") or (j + 1),
-                "text": choice.get("text") or choice.get("choice_text") or "",
-                "is_correct": 1 if (choice.get("is_correct") or choice.get("correct")) else 0,
-            })
-        if choices:
-            sb.table("exam_choices").insert(choices).execute()
+            "question_text": q.get("question_text") or q.get("question") or q.get("text") or "",
+            "explanation": q.get("explanation") or q.get("해설") or "",
+        })
+        choices_by_number[number] = [
+            {
+                "number": c.get("number") or c.get("no") or (j + 1),
+                "text": c.get("text") or c.get("choice_text") or "",
+                "is_correct": 1 if (c.get("is_correct") or c.get("correct")) else 0,
+            }
+            for j, c in enumerate(q.get("choices", []))
+        ]
+
+    if not rows:
+        return exam_id
+
+    q_res = db_exec(sb.table("exam_questions").insert(rows))
+    # 반환 순서에 기대지 않고 number로 매핑한다 (회차 내 number는 유일).
+    all_choices = []
+    for row in q_res.data:
+        for c in choices_by_number.get(row["number"], []):
+            all_choices.append({**c, "question_id": row["id"]})
+
+    if all_choices:
+        db_exec(sb.table("exam_choices").insert(all_choices))
 
     return exam_id
 
 
 def update_log(log_id: int, status: str, error_msg: str = None, exam_id: int = None):
     sb = get_supabase()
-    sb.table("exam_upload_logs").update({
+    db_exec(sb.table("exam_upload_logs").update({
         "status": status, "error_msg": error_msg,
         "exam_id": exam_id, "updated_at": now_kst(),
-    }).eq("id", log_id).execute()
+    }).eq("id", log_id))
 
 
 def background_parse(log_id: int, pdf_path: str, exam_info: dict, source_file: str, parser: str = "claude"):
+    created = {}   # save_to_db가 exam 행을 만든 즉시 채워진다 (실패 롤백용)
     try:
         update_log(log_id, "processing")
         with open(pdf_path, "rb") as f:
             pdf_bytes = f.read()
         data = parse_with_gemini(pdf_bytes) if parser == "gemini" else parse_with_claude(pdf_bytes)
-        exam_id = save_to_db(exam_info, data, source_file)
-        update_log(log_id, "done", exam_id=exam_id)
-        os.remove(pdf_path)
+        exam_id = save_to_db(exam_info, data, source_file, created)
     except Exception as e:
+        # 저장 도중 끊겼으면 반쪽 회차가 남는다 — 로그는 failed인데 앱에는
+        # 멀쩡한 회차로 보이므로 지운 뒤 실패 처리한다.
+        orphan_id = created.get("exam_id")
+        if orphan_id is not None:
+            try:
+                delete_exam_cascade(orphan_id)
+            except Exception as cleanup_err:
+                print(f"[upload] 롤백 실패 exam_id={orphan_id}: {cleanup_err}")
         # 실패 시 임시 PDF는 남겨둔다 — 재업로드 없이 재파싱 가능하도록
         update_log(log_id, "failed", error_msg=str(e))
+        return
+
+    # 저장이 끝난 뒤의 뒷정리 실패로 멀쩡한 회차를 롤백하지 않도록 분리한다
+    update_log(log_id, "done", exam_id=exam_id)
+    try:
+        os.remove(pdf_path)
+    except OSError as e:
+        print(f"[upload] 임시 PDF 삭제 실패 {pdf_path}: {e}")
+
 
 
 # ── 모델 ─────────────────────────────────────────────

@@ -26,7 +26,7 @@ BASE_DIR = _BACKEND_DIR
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 from supabase import create_client as _create_supabase_client
-from db import get_supabase
+from db import get_supabase, db_fetch_all
 from exam_ops import delete_exam_cascade
 from auth import get_current_user
 
@@ -207,19 +207,11 @@ def get_subjects(user_id: str = Depends(get_current_user)):
     # exam_id→subject 맵 (exam_exams는 작은 테이블)
     exams = sb.table("exam_exams").select("id, subject").execute().data
     exam_subj = {e["id"]: (e.get("subject") or "") for e in exams}
-    # exam_questions는 1000행 단위로 페이지네이션해 전수 집계
-    # (.execute() 단발 조회는 PostgREST 기본 1000행 제한에 걸려 누락됨)
     counts: dict = {}
-    start, PAGE = 0, 1000
-    while True:
-        rows = sb.table("exam_questions").select("exam_id").range(start, start + PAGE - 1).execute().data
-        for q in rows:
-            subj = exam_subj.get(q.get("exam_id"), "")
-            if subj:
-                counts[subj] = counts.get(subj, 0) + 1
-        if len(rows) < PAGE:
-            break
-        start += PAGE
+    for q in db_fetch_all(lambda: sb.table("exam_questions").select("exam_id")):
+        subj = exam_subj.get(q.get("exam_id"), "")
+        if subj:
+            counts[subj] = counts.get(subj, 0) + 1
     return [{"subject": s, "count": c} for s, c in sorted(counts.items())]
 
 
@@ -234,17 +226,17 @@ def get_random_questions(
     user_id: str = Depends(get_current_user),
 ):
     sb = get_supabase()
-    query = sb.table("exam_questions").select("id, exam_exams!inner(subject)")
+    id_list = [int(i) for i in exam_ids.split(",") if i.strip().isdigit()] if exam_ids else []
 
-    if subject:
-        query = query.eq("exam_exams.subject", subject)
-    if exam_ids:
-        id_list = [int(i) for i in exam_ids.split(",") if i.strip().isdigit()]
+    def build():
+        q = sb.table("exam_questions").select("id, exam_exams!inner(subject)")
+        if subject:
+            q = q.eq("exam_exams.subject", subject)
         if id_list:
-            query = query.in_("exam_id", id_list)
+            q = q.in_("exam_id", id_list)
+        return q
 
-    all_res = query.execute()
-    all_ids = [q["id"] for q in all_res.data]
+    all_ids = [q["id"] for q in db_fetch_all(build)]
 
     if source == "wrong":
         wrong_res = sb.table("exam_wrong_notes").select("question_id").eq("user_id", user_id).eq("is_dismissed", 0).execute()
@@ -304,8 +296,9 @@ def get_exam_mode_questions(
             all_questions.extend(exam_questions(exam_id))
         else:
             # 완전 랜덤 — 과목 내 20문제
-            ids_res = sb.table("exam_questions").select("id, exam_exams!inner(subject)").eq("exam_exams.subject", subject).execute()
-            ids = [r["id"] for r in ids_res.data]
+            ids = [r["id"] for r in db_fetch_all(
+                lambda: sb.table("exam_questions").select("id, exam_exams!inner(subject)").eq("exam_exams.subject", subject)
+            )]
             if not ids:
                 continue
             selected = random.sample(ids, min(20, len(ids)))
@@ -359,15 +352,17 @@ def get_questions(
     user_id: str = Depends(get_current_user),
 ):
     sb = get_supabase()
-    query = sb.table("exam_questions").select(
-        "*, exam_exams!inner(year, month, day, subject, grade), exam_choices(id, number, text, is_correct)"
-    )
-    if exam_id:
-        query = query.eq("exam_id", exam_id)
-    if subject:
-        query = query.eq("exam_exams.subject", subject)
-    res = query.order("exam_id").order("number").execute()
-    return [flatten_question(q) for q in res.data]
+    def build():
+        q = sb.table("exam_questions").select(
+            "*, exam_exams!inner(year, month, day, subject, grade), exam_choices(id, number, text, is_correct)"
+        )
+        if exam_id:
+            q = q.eq("exam_id", exam_id)
+        if subject:
+            q = q.eq("exam_exams.subject", subject)
+        return q.order("exam_id").order("number")
+
+    return [flatten_question(q) for q in db_fetch_all(build)]
 
 
 # ─── 풀이 기록 ────────────────────────────────────────
@@ -395,9 +390,9 @@ def _wrong_counts(sb, user_id: str, question_ids: list) -> dict:
     if not question_ids:
         return {}
     # is_correct는 integer 컬럼 — False로 비교하면 postgrest가 22P02를 뱉는다
-    res = sb.table("exam_solve_history").select("question_id").eq("user_id", user_id).eq("is_correct", 0).in_("question_id", question_ids).execute()
+    rows = db_fetch_all(lambda: sb.table("exam_solve_history").select("question_id").eq("user_id", user_id).eq("is_correct", 0).in_("question_id", question_ids))
     counts: dict = {}
-    for r in res.data:
+    for r in rows:
         counts[r["question_id"]] = counts.get(r["question_id"], 0) + 1
     return counts
 
@@ -405,18 +400,21 @@ def _wrong_counts(sb, user_id: str, question_ids: list) -> dict:
 def _record_solves(sb, user_id: str, answers: list[dict], session_id: Optional[int]) -> list:
     """답안 목록을 일괄 채점·기록. answers: [{question_id, selected_choice, time_taken}]"""
     q_ids = [a["question_id"] for a in answers]
-    ch_res = sb.table("exam_choices").select("question_id, number, is_correct").in_("question_id", q_ids).execute()
-    correct_map = {(c["question_id"], c["number"]): c["is_correct"] for c in ch_res.data}
+    ch_rows = db_fetch_all(lambda: sb.table("exam_choices").select("question_id, number, is_correct").in_("question_id", q_ids))
+    correct_map = {(c["question_id"], c["number"]): c["is_correct"] for c in ch_rows}
+    known_qs = {c["question_id"] for c in ch_rows}
 
     rows, results = [], []
     for a in answers:
-        key = (a["question_id"], a["selected_choice"])
-        if key not in correct_map:
+        qid = a["question_id"]
+        if qid not in known_qs:
+            # 선지가 한 개도 없는 문제 — 데이터 이상이라 채점할 수 없다
             continue
-        is_correct = correct_map[key]
+        # 없는 선지 번호는 오답 처리. 조용히 버리면 제출한 답이 통째로 사라져 총점이 틀어진다
+        is_correct = correct_map.get((qid, a["selected_choice"]), 0)
         rows.append({
             "user_id": user_id,
-            "question_id": a["question_id"],
+            "question_id": qid,
             "selected_choice": a["selected_choice"],
             "is_correct": is_correct,
             "time_taken": a.get("time_taken") or 0,
@@ -683,17 +681,9 @@ def get_exams(user_id: str = Depends(get_current_user)):
     exam_ids = [e["id"] for e in exams_res.data]
     if not exam_ids:
         return []
-    # exam_questions는 1000행 단위로 페이지네이션해 전수 집계
-    # (.execute() 단발 조회는 PostgREST 기본 1000행 제한에 걸려 누락됨)
     count_map: dict = {}
-    start, PAGE = 0, 1000
-    while True:
-        rows = sb.table("exam_questions").select("exam_id").range(start, start + PAGE - 1).execute().data
-        for q in rows:
-            count_map[q["exam_id"]] = count_map.get(q["exam_id"], 0) + 1
-        if len(rows) < PAGE:
-            break
-        start += PAGE
+    for q in db_fetch_all(lambda: sb.table("exam_questions").select("exam_id")):
+        count_map[q["exam_id"]] = count_map.get(q["exam_id"], 0) + 1
     for exam in exams_res.data:
         exam["question_count"] = count_map.get(exam["id"], 0)
     return exams_res.data
@@ -791,9 +781,9 @@ def get_session_detail(session_id: int, user_id: str = Depends(get_current_user)
 @api_router.get("/stats/wrong-counts")
 def get_wrong_counts(limit: int = 30, user_id: str = Depends(get_current_user)):
     sb = get_supabase()
-    res = sb.table("exam_solve_history").select("question_id").eq("user_id", user_id).eq("is_correct", 0).execute()
+    rows = db_fetch_all(lambda: sb.table("exam_solve_history").select("question_id").eq("user_id", user_id).eq("is_correct", 0))
     count_map = {}
-    for row in res.data:
+    for row in rows:
         qid = row["question_id"]
         count_map[qid] = count_map.get(qid, 0) + 1
     if not count_map:
@@ -825,9 +815,9 @@ def get_stats_overview(user_id: str = Depends(get_current_user)):
     excluded_res = sb.table("exam_sessions").select("id").eq("user_id", user_id).in_("mode", ["wrong", "scrap"]).execute()
     excluded_ids = {s["id"] for s in excluded_res.data}
 
-    sh_res = sb.table("exam_solve_history").select("id, question_id, is_correct, time_taken, session_id").eq("user_id", user_id).execute()
+    sh_rows = db_fetch_all(lambda: sb.table("exam_solve_history").select("id, question_id, is_correct, time_taken, session_id").eq("user_id", user_id))
     solve_history = [
-        sh for sh in sh_res.data
+        sh for sh in sh_rows
         if sh.get("session_id") is None or sh["session_id"] not in excluded_ids
     ]
 
@@ -837,8 +827,7 @@ def get_stats_overview(user_id: str = Depends(get_current_user)):
     q_ids = list({sh["question_id"] for sh in solve_history})
     subject_map = {}
     if q_ids:
-        q_res = sb.table("exam_questions").select("id, exam_exams!inner(subject)").in_("id", q_ids).execute()
-        for q in q_res.data:
+        for q in db_fetch_all(lambda: sb.table("exam_questions").select("id, exam_exams!inner(subject)").in_("id", q_ids)):
             subject_map[q["id"]] = (q.get("exam_exams") or {}).get("subject", "")
 
     by_subject_map: dict = {}

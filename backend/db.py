@@ -52,3 +52,26 @@ def db_exec(query, attempts: int = 4):
             if i == attempts - 1:
                 raise
             time.sleep(2 ** i)
+
+
+def db_fetch_all(build, page: int = 1000, attempts: int = 4) -> list:
+    """1000행 제한을 넘겨 전수 조회.
+
+    PostgREST는 서버 설정(db-max-rows=1000)으로 .range() 없는 단발 조회를
+    1000행에서 조용히 자른다. 에러도 경고도 '더 있음' 표시도 없어, 테이블이
+    커지는 순간부터 소리 없이 틀린 값이 나온다.
+
+    build는 매 페이지마다 '새' 쿼리를 만들어 돌려주는 함수여야 한다. 같은
+    빌더에 range()를 반복 호출하면 offset/limit 파라미터가 누적된다
+    (offset=0&offset=1000&limit=1000&limit=1000).
+
+    사용: db_fetch_all(lambda: sb.table("x").select("y").eq("a", b))
+    """
+    rows: list = []
+    start = 0
+    while True:
+        batch = db_exec(build().range(start, start + page - 1), attempts).data
+        rows.extend(batch)
+        if len(batch) < page:
+            return rows
+        start += page

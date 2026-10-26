@@ -26,7 +26,7 @@ BASE_DIR = _BACKEND_DIR
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 from supabase import create_client as _create_supabase_client
-from db import get_supabase, db_fetch_all
+from db import get_supabase, db_exec, db_fetch_all
 from exam_ops import delete_exam_cascade
 from auth import get_current_user
 
@@ -625,24 +625,24 @@ def update_settings(req: SettingsRequest, user_id: str = Depends(get_current_use
 # 비번은 exam_admin 테이블에 sha256 해시로 1행 저장(서비스키만 접근, RLS deny).
 # 프론트 번들에 평문이 박히지 않도록 서버에서만 검증한다.
 
-_ADMIN_PW_FALLBACK = "1234rla"  # exam_admin 행이 없을 때 최초 부트스트랩용
-
-
 def _hash_pw(pw: str) -> str:
     return hashlib.sha256(pw.encode()).hexdigest()
 
 
 def _admin_hash(sb) -> str:
-    """저장된 관리자 비번 해시. 행이 없으면 fallback을 시드 후 반환.
-    테이블 자체가 아직 없으면(배포 직후 SQL 미실행) fallback 해시로 동작."""
+    """저장된 관리자 비번 해시. 행이 없으면 env ADMIN_PW_INIT로 최초 시드.
+    조회 실패나 미설정 시 기본값으로 열어주지 않고 503."""
     try:
-        res = sb.table("exam_admin").select("password_hash").eq("id", 1).execute()
+        res = db_exec(sb.table("exam_admin").select("password_hash").eq("id", 1))
     except Exception:
-        return _hash_pw(_ADMIN_PW_FALLBACK)
+        raise HTTPException(status_code=503, detail="관리자 비밀번호를 확인할 수 없어요")
     if res.data:
         return res.data[0]["password_hash"]
-    h = _hash_pw(_ADMIN_PW_FALLBACK)
-    sb.table("exam_admin").insert({"id": 1, "password_hash": h}).execute()
+    init = os.getenv("ADMIN_PW_INIT")
+    if not init:
+        raise HTTPException(status_code=503, detail="관리자 비밀번호가 설정되지 않았어요")
+    h = _hash_pw(init)
+    db_exec(sb.table("exam_admin").insert({"id": 1, "password_hash": h}))
     return h
 
 

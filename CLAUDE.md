@@ -253,7 +253,7 @@ PC(768px+): `body { zoom: 1.25 }`
 
 - 비밀번호는 DB `exam_admin` 테이블에 sha256 해시로 1행 저장 (서비스키만 접근, RLS deny) — 프론트 번들에 평문 없음
 - 검증: `POST /api/admin/verify` / 변경: `POST /api/admin/password` (현재 비번 확인 후, 4자 이상) — 관리자 탭 내 비번 변경 UI 제공
-- `exam_admin` 행이 없으면 `main.py`의 `_ADMIN_PW_FALLBACK`으로 자동 시드 (최초 부트스트랩용)
+- `exam_admin` 행이 없으면 env `ADMIN_PW_INIT`으로 최초 시드 — 미설정이거나 조회 실패 시 503 (기본 비번으로 열어주지 않음, 코드에 평문 비번 두지 말 것)
 - sessionStorage `_adm` 키로 세션 내 잠금 유지, 로그아웃 시 해제
 - 신고 목록: 모든 유저의 신고 표시, 편집/해제 버튼 제공
 - **업로드·로그 탭**: `localhost`, `127.0.0.1`, `192.168.50.102` 접속 시에만 표시 (Vercel 외부 접근 시 숨김)

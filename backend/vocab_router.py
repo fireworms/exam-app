@@ -7,6 +7,7 @@ from google import genai
 from dotenv import load_dotenv
 from db import get_supabase, db_exec, db_fetch_all
 from auth import get_current_user
+from exam_freq import exam_freq
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
@@ -34,7 +35,6 @@ ANALYZE_PROMPT = """당신은 9급 공무원 영어 시험 전문 어휘 분석�
 - example: 9급 수준의 짧은 예문 (영어)
 - example_translation: 예문 한국어 번역
 - synonyms: 9급 시험에서 동의어로 출제 가능한 단어/구 2~3개 (영어). 없으면 빈 배열.
-- is_high_freq: 9급 공무원 영어 시험에서 고빈도로 출제되는 어휘이면 true
 - root_form: 입력 단어가 파생어(과거분사·현재분사가 형용사로 쓰인 경우, -ly 부사, -tion/-ness 등 명사화)일 때 원형 동사/형용사. 원형과 동일하거나 숙어이면 null. 예) "diluted"→"dilute", "running"→"run", "carefully"→"careful", "pollution"→"pollute", "happiness"→"happy", "dilute"→null
 
 응답 형식:
@@ -46,7 +46,6 @@ ANALYZE_PROMPT = """당신은 9급 공무원 영어 시험 전문 어휘 분석�
   "example": "영어 예문",
   "example_translation": "예문 한국어 번역",
   "synonyms": ["동의어1", "동의어2"],
-  "is_high_freq": true or false,
   "root_form": "원형 단어" or null
 }}"""
 
@@ -104,6 +103,17 @@ def _upsert_vocab(sb, user_id: str, data: dict):
     return res.data[0]["id"], True
 
 
+def _attach_freq(items):
+    """exam_freq 필드 부착 — 기출 코퍼스 로드 실패해도 본 응답은 살린다."""
+    try:
+        for it in items:
+            if it:
+                it["exam_freq"] = exam_freq(it.get("word") or "")
+    except Exception as e:
+        print(f"[exam_freq] {e}")
+    return items
+
+
 @router.post("/analyze")
 def analyze_vocab(req: AnalyzeRequest, user_id: str = Depends(get_current_user)):
     text = req.text.strip()
@@ -127,6 +137,7 @@ def analyze_vocab(req: AnalyzeRequest, user_id: str = Depends(get_current_user))
         except Exception:
             pass
 
+    _attach_freq([data, root_data])
     return {**data, "source_text": text, "root_data": root_data}
 
 
@@ -159,7 +170,7 @@ def list_vocab(
             q = q.gt("created_at", after)
         return q.order("created_at", desc=False)
 
-    return db_fetch_all(build)
+    return _attach_freq(db_fetch_all(build))
 
 
 @router.post("/{vocab_id}/quiz")

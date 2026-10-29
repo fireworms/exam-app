@@ -11,7 +11,8 @@ const JSON_FORMAT_TEMPLATE = `{
     "subject": "영어",
     "grade": "9급",
     "region": "국가직",
-    "source_file": "AI예상문제_2026_9급국가직영어"
+    "source_file": "AI예상문제_2026_9급국가직영어",
+    "is_official": false
   },
   "questions": [
     {
@@ -100,6 +101,15 @@ export default function UploadPage() {
       return [...prev, ...items.filter((i) => !existingNames.has(i.name))];
     });
   };
+
+  const toggleJsonOfficial = (name) =>
+    setJsonItems((prev) =>
+      prev.map((i) =>
+        i.name === name
+          ? { ...i, parsed: { ...i.parsed, exam: { ...i.parsed.exam, is_official: !i.parsed.exam?.is_official } } }
+          : i
+      )
+    );
 
   const removeJsonItem = (name) =>
     setJsonItems((prev) => prev.filter((i) => i.name !== name));
@@ -288,6 +298,21 @@ export default function UploadPage() {
                         <strong style={{ fontSize: 13, marginLeft: item.status !== "pending" ? 8 : 0 }}>
                           {item.name}
                         </strong>
+                        {item.parsed && (
+                          <button
+                            disabled={item.status !== "pending"}
+                            onClick={() => toggleJsonOfficial(item.name)}
+                            title="클릭해서 실제 기출 / 예상문제 전환"
+                            style={{
+                              marginLeft: 8, fontSize: 11, padding: "1px 7px", borderRadius: 4,
+                              cursor: item.status === "pending" ? "pointer" : "default",
+                              border: "1px solid var(--border)", background: "var(--bg3)",
+                              color: item.parsed.exam?.is_official ? "var(--correct)" : "var(--text2)",
+                            }}
+                          >
+                            {item.parsed.exam?.is_official ? "실제 기출" : "예상문제"}
+                          </button>
+                        )}
                         {item.parsed && (
                           <span style={styles.previewMeta}>
                             {" "}— {item.parsed.exam?.subject} {item.parsed.exam?.grade}{" "}
@@ -483,6 +508,18 @@ export default function UploadPage() {
                         selectStyle={styles.select}
                         inputStyle={styles.input}
                       />
+                    </div>
+
+                    <div style={styles.formGroup}>
+                      <label style={styles.label}>구분</label>
+                      <select
+                        style={styles.select}
+                        value={f.parsed.is_official === false ? "0" : "1"}
+                        onChange={(e) => updateField(idx, "is_official", e.target.value === "1")}
+                      >
+                        <option value="1">실제 기출</option>
+                        <option value="0">예상문제</option>
+                      </select>
                     </div>
 
                     <div style={styles.formGroup}>

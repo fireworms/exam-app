@@ -879,8 +879,8 @@ export default function Quiz() {
                   {vocabModal.type === 'phrase' && (
                     <span style={{ fontSize: 12, color: 'var(--text2)', background: 'var(--bg3)', padding: '2px 7px', borderRadius: 5 }}>숙어</span>
                   )}
-                  {vocabModal.is_high_freq && (
-                    <span style={{ fontSize: 12, color: '#ca8a04', background: 'rgba(234,179,8,0.1)', padding: '2px 7px', borderRadius: 5 }}>★ 고빈도</span>
+                  {vocabModal.exam_freq > 0 && (
+                    <span style={{ fontSize: 12, color: '#ca8a04', background: 'rgba(234,179,8,0.1)', padding: '2px 7px', borderRadius: 5 }}>기출 {vocabModal.exam_freq}회</span>
                   )}
                 </div>
 

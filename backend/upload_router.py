@@ -65,6 +65,7 @@ def parse_filename(filename: str) -> dict:
     return {
         "year": year, "month": month, "day": day,
         "grade": grade or "", "region": region or "", "subject": subject or "",
+        "is_official": "예상" not in name,
     }
 
 
@@ -265,6 +266,7 @@ def save_to_db(exam_info: dict, data: dict, source_file: str, created: dict = No
         "year": exam_info["year"], "month": exam_info["month"], "day": exam_info["day"],
         "subject": exam_info["subject"], "grade": exam_info["grade"],
         "region": exam_info.get("region", ""), "source_file": source_file,
+        "is_official": exam_info.get("is_official", True),
     }))
     exam_id = exam_res.data[0]["id"]
     if created is not None:
@@ -353,6 +355,7 @@ class ExamInfo(BaseModel):
     grade: str = ""
     region: str = ""
     subject: str = ""
+    is_official: bool = True  # PDF 시험지는 기본 실제 기출
 
 
 class ConfirmItem(BaseModel):
@@ -403,6 +406,7 @@ class ExamMeta(BaseModel):
     grade: str = ""
     region: str = ""
     source_file: str = "AI예상문제"
+    is_official: bool = False  # JSON 임포트는 기본 예상문제
 
 
 class JsonImportRequest(BaseModel):

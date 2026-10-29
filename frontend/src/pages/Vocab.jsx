@@ -22,10 +22,17 @@ const POS_OPTIONS = [
   ...Object.entries(POS_LABELS).map(([v, l]) => ({ value: v, label: `${v} ${l}` })),
 ]
 
+const FREQ_OPTIONS = [
+  { value: 0, label: '기출 전체' },
+  { value: 1, label: '기출 1회+' },
+  { value: 2, label: '기출 2회+' },
+  { value: 3, label: '기출 3회+' },
+]
+
 export default function Vocab() {
   const [searchParams, setSearchParams] = useSearchParams()
   const posFilter = searchParams.get('pos') || ''
-  const highFreqOnly = searchParams.get('hf') === '1'
+  const minFreq = Number(searchParams.get('freq')) || 0
   const sort = searchParams.get('sort') || 'created_desc'
   const hideMeaning = searchParams.get('hide') === '1'
 
@@ -86,7 +93,8 @@ export default function Vocab() {
   const items = useMemo(() => {
     let result = allItems
     if (posFilter) result = result.filter(i => i.pos === posFilter)
-    if (highFreqOnly) result = result.filter(i => i.is_high_freq)
+    if (minFreq) result = result.filter(i => (i.exam_freq || 0) >= minFreq)
+    if (sort === 'freq') return [...result].sort((a, b) => (b.exam_freq || 0) - (a.exam_freq || 0))
     if (sort === 'alpha') return [...result].sort((a, b) => a.word.localeCompare(b.word))
     if (sort === 'wrong_rate' || sort === 'correct_rate') {
       // 안 풀어본 단어는 맨 뒤, 동률이면 많이 푼 순
@@ -98,7 +106,7 @@ export default function Vocab() {
       })
     }
     return [...result].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-  }, [allItems, posFilter, highFreqOnly, sort])
+  }, [allItems, posFilter, minFreq, sort])
 
   const handleQuizRecord = useCallback((id, correct) => {
     setAllItems(prev => prev.map(i => i.id !== id ? i : {
@@ -166,17 +174,18 @@ export default function Vocab() {
           {POS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
 
-        <button
-          onClick={() => updateParams({ hf: highFreqOnly ? '' : '1' })}
+        <select
+          value={minFreq}
+          onChange={e => updateParams({ freq: e.target.value === '0' ? '' : e.target.value })}
           style={{
             ...selStyle,
-            background: highFreqOnly ? 'rgba(234,179,8,0.15)' : 'var(--bg3)',
-            border: `1px solid ${highFreqOnly ? '#ca8a04' : 'var(--border)'}`,
-            color: highFreqOnly ? '#ca8a04' : 'var(--text2)',
+            background: minFreq ? 'rgba(234,179,8,0.15)' : 'var(--bg3)',
+            border: `1px solid ${minFreq ? '#ca8a04' : 'var(--border)'}`,
+            color: minFreq ? '#ca8a04' : 'var(--text)',
           }}
         >
-          ★ 고빈도만
-        </button>
+          {FREQ_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
 
         <button
           onClick={() => { updateParams({ hide: hideMeaning ? '' : '1' }); setRevealed(new Set()) }}
@@ -207,6 +216,7 @@ export default function Vocab() {
           {[
             { val: 'created_desc', label: '최신순' },
             { val: 'alpha', label: '알파벳순' },
+            { val: 'freq', label: '기출순' },
             { val: 'wrong_rate', label: '오답률순' },
             { val: 'correct_rate', label: '정답률순' },
           ].map(o => (
@@ -253,9 +263,9 @@ export default function Vocab() {
                         {item.pos}
                       </span>
                     )}
-                    {item.is_high_freq && (
-                      <span style={{ fontSize: 11, color: '#ca8a04', background: 'rgba(234,179,8,0.1)', padding: '2px 6px', borderRadius: 4 }}>
-                        ★ 고빈도
+                    {item.exam_freq > 0 && (
+                      <span title="실제 기출(AI 예상문제 제외)에서 등장한 회차 수" style={{ fontSize: 11, color: '#ca8a04', background: 'rgba(234,179,8,0.1)', padding: '2px 6px', borderRadius: 4 }}>
+                        기출 {item.exam_freq}회
                       </span>
                     )}
                     {hideMeaning && !revealed.has(item.id) ? (

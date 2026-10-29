@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 from google import genai
 from dotenv import load_dotenv
-from db import get_supabase
+from db import get_supabase, db_exec, db_fetch_all
 from auth import get_current_user
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
@@ -67,6 +67,10 @@ class SaveVocabRequest(BaseModel):
     source_text: Optional[str] = None
     root_form: Optional[str] = None
     root_data: Optional[dict] = None
+
+
+class QuizResultRequest(BaseModel):
+    correct: bool
 
 
 def _analyze_text(text: str) -> dict:
@@ -148,12 +152,25 @@ def list_vocab(
     user_id: str = Depends(get_current_user),
 ):
     sb = get_supabase()
-    q = sb.table("exam_vocab").select("*").eq("user_id", user_id)
-    if after:
-        q = q.gt("created_at", after)
-    q = q.order("created_at", desc=False)
-    res = q.execute()
-    return res.data
+
+    def build():
+        q = sb.table("exam_vocab").select("*").eq("user_id", user_id)
+        if after:
+            q = q.gt("created_at", after)
+        return q.order("created_at", desc=False)
+
+    return db_fetch_all(build)
+
+
+@router.post("/{vocab_id}/quiz")
+def record_quiz(vocab_id: int, req: QuizResultRequest, user_id: str = Depends(get_current_user)):
+    sb = get_supabase()
+    res = db_exec(sb.rpc("exam_vocab_quiz_record", {
+        "p_id": vocab_id, "p_user": user_id, "p_correct": req.correct,
+    }))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="단어를 찾을 수 없어요")
+    return res.data[0]
 
 
 @router.delete("/{vocab_id}")

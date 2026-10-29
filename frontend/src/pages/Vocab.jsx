@@ -1,8 +1,11 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import axios from '../axios'
 import API from '../api'
 import { speak, useSpeaking } from '../tts'
+import VocabQuiz from '../components/VocabQuiz'
+import { wrongRate, quizTotal, canQuiz } from '../utils/vocabQuiz'
+import { accColor } from '../utils/format'
 
 const POS_LABELS = {
   'n.': '명사',
@@ -24,12 +27,15 @@ export default function Vocab() {
   const posFilter = searchParams.get('pos') || ''
   const highFreqOnly = searchParams.get('hf') === '1'
   const sort = searchParams.get('sort') || 'created_desc'
+  const hideMeaning = searchParams.get('hide') === '1'
 
   const speaking = useSpeaking()
   const [allItems, setAllItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [hasNew, setHasNew] = useState(false)
   const [expanded, setExpanded] = useState(null)
+  const [revealed, setRevealed] = useState(() => new Set())
+  const [quizOpen, setQuizOpen] = useState(false)
   const fetchedAtRef = useRef(null)
 
   const updateParams = (updates) => {
@@ -82,8 +88,34 @@ export default function Vocab() {
     if (posFilter) result = result.filter(i => i.pos === posFilter)
     if (highFreqOnly) result = result.filter(i => i.is_high_freq)
     if (sort === 'alpha') return [...result].sort((a, b) => a.word.localeCompare(b.word))
+    if (sort === 'wrong_rate' || sort === 'correct_rate') {
+      // 안 풀어본 단어는 맨 뒤, 동률이면 많이 푼 순
+      const dir = sort === 'wrong_rate' ? 1 : -1
+      return [...result].sort((a, b) => {
+        const ra = wrongRate(a), rb = wrongRate(b)
+        if (ra === null || rb === null) return (ra === null) - (rb === null)
+        return dir * (rb - ra) || quizTotal(b) - quizTotal(a)
+      })
+    }
     return [...result].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
   }, [allItems, posFilter, highFreqOnly, sort])
+
+  const handleQuizRecord = useCallback((id, correct) => {
+    setAllItems(prev => prev.map(i => i.id !== id ? i : {
+      ...i,
+      quiz_correct: (i.quiz_correct || 0) + (correct ? 1 : 0),
+      quiz_wrong: (i.quiz_wrong || 0) + (correct ? 0 : 1),
+    }))
+    axios.post(`${API}/vocab/${id}/quiz`, { correct }).catch(console.error)
+  }, [])
+
+  const toggleReveal = (id) => {
+    setRevealed(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
 
   const handleDelete = async (id) => {
     if (!confirm('단어를 삭제할까요?')) return
@@ -146,10 +178,37 @@ export default function Vocab() {
           ★ 고빈도만
         </button>
 
+        <button
+          onClick={() => { updateParams({ hide: hideMeaning ? '' : '1' }); setRevealed(new Set()) }}
+          style={{
+            ...selStyle,
+            background: hideMeaning ? 'rgba(99,102,241,0.1)' : 'var(--bg3)',
+            border: `1px solid ${hideMeaning ? 'var(--accent)' : 'var(--border)'}`,
+            color: hideMeaning ? 'var(--accent)' : 'var(--text2)',
+          }}
+        >
+          🙈 뜻 가리기
+        </button>
+
+        <button
+          onClick={() => setQuizOpen(true)}
+          disabled={items.length === 0 || !canQuiz(allItems)}
+          title={canQuiz(allItems) ? '현재 목록에서 출제' : '서로 다른 뜻의 단어가 4개 이상 필요해요'}
+          style={{
+            ...selStyle,
+            background: 'var(--accent)', border: '1px solid var(--accent)', color: 'white',
+            opacity: items.length === 0 || !canQuiz(allItems) ? 0.4 : 1,
+          }}
+        >
+          ✏️ 퀴즈
+        </button>
+
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           {[
             { val: 'created_desc', label: '최신순' },
             { val: 'alpha', label: '알파벳순' },
+            { val: 'wrong_rate', label: '오답률순' },
+            { val: 'correct_rate', label: '정답률순' },
           ].map(o => (
             <button key={o.val} onClick={() => updateParams({ sort: o.val === 'created_desc' ? '' : o.val })} style={{
               ...selStyle,
@@ -199,7 +258,29 @@ export default function Vocab() {
                         ★ 고빈도
                       </span>
                     )}
-                    <span style={{ fontSize: 14, color: 'var(--text2)' }}>{item.meaning}</span>
+                    {hideMeaning && !revealed.has(item.id) ? (
+                      <span
+                        onClick={e => { e.stopPropagation(); toggleReveal(item.id) }}
+                        style={{
+                          fontSize: 14, color: 'transparent', background: 'var(--bg3)',
+                          borderRadius: 4, padding: '0 8px', cursor: 'pointer', userSelect: 'none',
+                          textShadow: '0 0 8px var(--text2)',
+                        }}
+                      >{item.meaning}</span>
+                    ) : (
+                      <span
+                        onClick={hideMeaning ? e => { e.stopPropagation(); toggleReveal(item.id) } : undefined}
+                        style={{ fontSize: 14, color: 'var(--text2)' }}
+                      >{item.meaning}</span>
+                    )}
+                    {quizTotal(item) > 0 && (() => {
+                      const acc = Math.round((1 - wrongRate(item)) * 100)
+                      return (
+                        <span title={`정답 ${item.quiz_correct} · 오답 ${item.quiz_wrong}`} style={{
+                          fontSize: 11, fontFamily: 'JetBrains Mono', color: accColor(acc),
+                        }}>{acc}% ({item.quiz_correct}/{quizTotal(item)})</span>
+                      )
+                    })()}
                   </div>
                   <span style={{ color: 'var(--text2)', fontSize: 12 }}>{isOpen ? '▲' : '▼'}</span>
                 </div>
@@ -210,7 +291,7 @@ export default function Vocab() {
                       <div>
                         <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>예문</div>
                         <div style={{ fontSize: 14, fontStyle: 'italic', lineHeight: 1.6 }}>{item.example}</div>
-                        {item.example_translation && (
+                        {item.example_translation && (!hideMeaning || revealed.has(item.id)) && (
                           <div style={{ fontSize: 13, color: 'var(--text2)', marginTop: 4 }}>{item.example_translation}</div>
                         )}
                       </div>
@@ -256,6 +337,15 @@ export default function Vocab() {
             )
           })}
         </div>
+      )}
+
+      {quizOpen && (
+        <VocabQuiz
+          pool={items}
+          allItems={allItems}
+          onRecord={handleQuizRecord}
+          onClose={() => setQuizOpen(false)}
+        />
       )}
     </div>
   )

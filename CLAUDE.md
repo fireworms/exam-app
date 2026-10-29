@@ -56,6 +56,8 @@ nohup uvicorn main:app --host 0.0.0.0 --port 8008 > /tmp/backend.log 2>&1 &
 | `backend/edit_router.py` | 문제 편집/이미지 (`/api/questions`) |
 | `backend/exam_ops.py` | `delete_exam_cascade()` — 회차 삭제 (엔드포인트·업로드 롤백 공용) |
 | `backend/vocab_router.py` | 단어장 (`/api/vocab`) |
+| `backend/exam_freq.py` | 단어장 `exam_freq` — 실제 영어 기출 등장 회차 수 (simplemma 표제어, 10분 캐시) |
+| `backend/sql/` | 수동 실행 DDL (Supabase SQL Editor) |
 | `backend/images/` | 문제 이미지 로컬 캐시 (레거시, 실제 서빙은 Storage) |
 | `api/index.py` | Vercel 서버리스 진입점 (`backend.main:app` 로드) |
 | `pyproject.toml` | Vercel entrypoint 설정 (`[tool.vercel]`) |
@@ -72,7 +74,7 @@ nohup uvicorn main:app --host 0.0.0.0 --port 8008 > /tmp/backend.log 2>&1 &
 
 ```
 exam_exams          시험 메타데이터
-  id, year, month, day, subject, grade, region, source_file
+  id, year, month, day, subject, grade, region, source_file, is_official(실제 기출=true / 예상문제=false)
 
 exam_questions      문제
   id, exam_id → exam_exams, number, question_text, question_image(Storage 공개 URL), explanation
@@ -96,7 +98,7 @@ exam_scraps         id, user_id, question_id UNIQUE, memo, created_at
 exam_sessions       id, user_id, mode, subject, exam_id, total_count, correct_count, skipped_count, duration
 exam_settings       id, user_id, auto_remove_wrong
 exam_reports        id, user_id, question_id UNIQUE(user_id,question_id), created_at
-exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example, example_translation, synonyms(jsonb), is_high_freq, source_text, created_at
+exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example, example_translation, synonyms(jsonb), is_high_freq(미사용), source_text, quiz_correct, quiz_wrong, created_at
 ```
 
 ---
@@ -213,7 +215,8 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 |-----------|------|
 | `POST /api/vocab/analyze` | 선택 텍스트 Gemini 분석 → 단어 정보 + root_data 반환 |
 | `POST /api/vocab` | 단어 저장 (upsert) — root_data 있으면 원형도 함께 저장 |
-| `GET /api/vocab` | 단어 목록 (after 파라미터로 증분 fetch 지원) |
+| `GET /api/vocab` | 단어 목록 (after 파라미터로 증분 fetch 지원) — 각 행에 `exam_freq` 부착 |
+| `POST /api/vocab/{id}/quiz` | 미니 퀴즈 결과 기록 (`exam_vocab_quiz_record` RPC로 원자적 증가) |
 | `DELETE /api/vocab/{id}` | 단어 삭제 |
 
 ### edit_router.py (`/api/questions`)
@@ -241,7 +244,7 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 | `/session/:session_id` | SessionReview | 풀이 회차 리뷰 (목록↔상세, 오답만 토글). 시험 직후엔 state로 받아 fetch 없이 표시 |
 | `/admin` | Admin | 관리자 페이지 (비밀번호 게이트) — 업로드/로그/회차관리/신고 탭 |
 | `/edit/:question_id` | EditQuestion | 문제/이미지 수정 |
-| `/vocab` | Vocab | 단어장 목록 (필터·정렬, URL 파라미터 유지) |
+| `/vocab` | Vocab | 단어장 목록 (품사·기출 N회+ 필터, 최신/알파벳/기출/오답률/정답률 정렬, 뜻 가리기, 4지선다 미니 퀴즈 — URL 파라미터 유지) |
 | `/settings` | Settings | auto_remove_wrong 설정 |
 | `/upload`, `/logs` | — | `/admin`으로 리다이렉트 |
 
@@ -301,5 +304,8 @@ AI 파서가 공통지문 문제를 `(N번 공통지문 문제)` 형태로 마�
 - 랜덤 문제: DB 조회 후 `random.shuffle()` 적용 — 미적용 시 ID 순(연도순) 정렬됨
 - 토큰 갱신(`/api/auth/refresh`) 에러 구분: 네트워크 오류 → 503(로그아웃 안 함), 실제 토큰 만료/무효 → 401(로그아웃)
 - 단어장 모드: Quiz에서 드래그 → Gemini 분석 → 모달 확인 후 저장. 파생어면 원형(`root_data`)도 함께 분석·표시·저장
+- **단어장 '기출 N회'**: AI 고빈도 판정(`is_high_freq`)은 거의 전부 true라 폐기. `exam_freq.py`가 `is_official=true`인 영어 회차의 지문·선지를 표제어로 묶어 **회차 수**를 센다 (공통지문 복제 때문에 문제 수 아님). 저장 안 하고 조회 시 계산 → 회차 추가/삭제 자동 반영. 기출/예상문제 구분은 파일명이 아니라 `is_official` 컬럼 — 업로드 폼에서 선택 (PDF 기본 기출, JSON 기본 예상문제)
+- **새 Python 의존성은 `pyproject.toml`에 반드시 추가** — Vercel은 pyproject dependencies로 설치한다. requirements.txt에만 넣으면 prod가 import 단계에서 죽어 전 경로 500 (`FUNCTION_INVOCATION_FAILED`)
+- 단어장 미니 퀴즈(`components/VocabQuiz.jsx`, `utils/vocabQuiz.js`): 현재 필터 범위에서 무한 출제, 오답·미풀이 단어 가중. 오답 선지는 단어장 다른 단어 뜻(같은 품사 우선)
 - 단어장 목록: 초기 1회 fetch 후 필터·정렬은 클라이언트 `useMemo` 처리. 다른 탭 저장 감지는 `BroadcastChannel('vocab_update')`
 - TTS(`tts.js`): 한글/영어 구간 분리 후 각각 ko-KR·en-US로 큐 읽기. `__밑줄__` 마크업·3개 이상 언더스코어·원문자 전처리 제거

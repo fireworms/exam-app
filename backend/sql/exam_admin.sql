@@ -9,5 +9,3 @@ create table if not exists exam_admin (
 alter table exam_admin enable row level security;
 -- 정책을 만들지 않으면 anon/authenticated는 전부 거부됨.
 -- 서비스 롤(백엔드)은 RLS를 우회하므로 정상 동작.
-
--- 최초 비번(1234rla)은 백엔드가 행이 없을 때 자동 시드하므로 별도 insert 불필요.

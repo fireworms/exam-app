@@ -320,6 +320,7 @@ AI 파서가 공통지문 문제를 `(N번 공통지문 문제)` 형태로 마�
 trading_system 웹 에이전트를 이식. 폰 → `http://<tailscale-ip>:8009/agent` ↔ `exam-agent` 서비스(`backend/agent_main.py`) ↔ `claude-agent-sdk` ↔ 서버 Claude Code CLI (cwd=프로젝트 루트, CLAUDE.md·메모리 로드)
 
 - **8008 백엔드와 별도 프로세스**: 에이전트가 8008을 kill/재기동해도 자기는 안 죽게. 반대로 **exam-agent 재시작·8009 kill·`pkill uvicorn`은 대화를 끊는다** → guard 차단
+- **셀프 재시작은 화면의 '재시작' 버튼** (모바일엔 터미널이 없다): WS `restart` → 세션 ID를 `~/.cache/exam-agent/last_session`에 저장 → `os._exit(1)` → systemd `Restart=on-failure`가 ~10초 뒤 재기동(sudo 불필요) → 허브가 직전 세션을 복원해 다음 메시지에서 resume. 응답 중엔 거부. 에이전트가 띄운 8008은 같은 cgroup이라 함께 꺼진다. 에이전트 백엔드 코드(`agent_main.py`·`agent/`·`auth.py`) 수정 후 이걸로 반영
 - **systemd 유닛은 에이전트 전용** — "systemd 금지" 규칙은 8008 백엔드(크래시 루프 전력) 얘기. 8008은 계속 on-demand. 에이전트 세션에선 SessionStart/End 훅(settings.local.json)이 안 돌므로 8008이 필요하면 에이전트가 직접 띄운다
 - **`main.py`를 import하지 않는다**: main의 `load_dotenv`가 `ANTHROPIC_API_KEY`를 환경에 올리면 CLI가 구독 대신 API 과금으로 붙는다(크레딧 0). 그래서 :8009엔 `/api`가 없고, `/agent` 페이지는 supabase-js `signInWithPassword`로 직접 로그인. `axios.js`의 `/login` 리다이렉트에서 `/agent` 제외
 - **prod(Vercel, https)에선 못 쓴다** — 로컬 `ws://`가 mixed content로 막힘. `agentAvailable()`(http 접속)일 때만 관리자 헤더에 링크 노출

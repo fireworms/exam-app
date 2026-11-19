@@ -13,6 +13,7 @@
 
 실행: cd backend && venv/bin/uvicorn agent_main:app --host <tailscale-ip> --port 8009
 """
+import asyncio
 import logging
 import os
 
@@ -83,6 +84,15 @@ async def agent_ws(ws: WebSocket):
                 await hub.interrupt()
             elif t == "close":
                 await hub.close()
+            elif t == "restart":
+                # 셀프 재시작: 종료 코드 1로 나가면 systemd(Restart=on-failure)가 다시 띄운다 — sudo 불필요.
+                # 모바일엔 터미널이 없어 agent 코드 수정 후 반영할 방법이 이것뿐
+                if await hub.prepare_restart():
+                    await ws.send_json({"type": "restarting"})
+                    logger.info("self-restart requested from web")
+                    asyncio.get_running_loop().call_later(0.5, os._exit, 1)
+                else:
+                    await ws.send_json({"type": "error", "message": "응답 진행 중 — 끝나거나 중단한 뒤 재시작하세요"})
             elif t == "sessions":
                 # REST 대신 WS로 — 인증을 한 곳(첫 메시지)에만 둔다
                 await ws.send_json({"type": "sessions", "items": list_project_sessions(limit=20)})

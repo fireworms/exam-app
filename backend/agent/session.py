@@ -38,13 +38,15 @@ SESSIONS_DIR = (Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".clau
 _PERMISSION_TIMEOUT_S = 600
 _IDLE_DISCONNECT_S = 30 * 60
 _LOG_CAP = 400
+# 셀프 재시작(웹 버튼) 전후로 이어 쓸 세션 ID — 재시작 후 같은 대화로 resume
+_LAST_SESSION_FILE = Path.home() / ".cache" / "exam-agent" / "last_session"
 _PREVIEW_CHARS = 1500
 
 _APPEND_PROMPT = (
     "이 세션은 모바일 웹 UI(exam-agent, :8009)를 통해 진행된다. 대화형 터미널이 없다.\n"
     "- AskUserQuestion 도구는 쓸 수 없다. 선택이 필요하면 본문에 번호 목록으로 묻는다.\n"
     "- 화면이 좁다. 답변은 짧게, 표는 3열 이하로.\n"
-    "- `systemctl restart exam-agent`·8009 포트 kill·`pkill uvicorn`은 이 대화를 끊는다 — 필요하면 사용자에게 터미널에서 하라고 안내.\n"
+    "- exam-agent(이 서비스) 재시작이 필요하면(backend/agent*·auth.py 수정 후) 사용자에게 화면 상단 '재시작' 버튼을 누르라고 안내한다. 직접 systemctl·8009 kill·`pkill uvicorn`은 차단돼 있다. 재시작하면 같은 세션으로 이어지지만, 이 세션에서 띄운 8008도 함께 죽는다.\n"
     "- 8008 로컬 백엔드 재기동(`scripts/dev-server-stop.sh` → `scripts/dev-server-start.sh`)은 이 세션에 영향이 없다.\n"
     "- SessionStart/End 훅(settings.local.json)은 이 세션에선 돌지 않는다 — 8008이 필요하면 직접 띄운다.\n"
     "- prod 반영은 커밋 후 `git push origin master` (Vercel 자동배포). 수동 vercel --prod는 차단돼 있다."
@@ -200,6 +202,31 @@ class AgentHub:
                 await self._send(ws, {"type": "reset"})
                 for ev in self._log:
                     await self._send(ws, ev)
+
+    async def prepare_restart(self) -> bool:
+        """셀프 재시작 직전 정리 — CLI를 내리고 세션 ID를 디스크에 남긴다. 응답 중이면 거부."""
+        if self.state == "running":
+            return False
+        sid = self.session_id
+        await self.close()
+        if sid:
+            try:
+                _LAST_SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+                _LAST_SESSION_FILE.write_text(sid)
+            except OSError as e:
+                logger.warning("last session save failed: %s", e)
+        return True
+
+    def restore_last_session(self) -> None:
+        """재시작 후 첫 허브 생성 시 — 직전 세션을 대기 상태로 복원 (다음 메시지에서 resume)."""
+        try:
+            sid = _LAST_SESSION_FILE.read_text().strip()
+            _LAST_SESSION_FILE.unlink()
+        except OSError:
+            return
+        if sid:
+            self.session_id = sid
+            self._log = load_history_events(sid)
 
     async def close(self) -> None:
         async with self._lock:
@@ -441,4 +468,5 @@ def get_hub() -> AgentHub:
     global _hub
     if _hub is None:
         _hub = AgentHub()
+        _hub.restore_last_session()
     return _hub

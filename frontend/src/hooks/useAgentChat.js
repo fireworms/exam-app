@@ -59,6 +59,10 @@ export function useAgentChat(enabled = true) {
             setEvents([])
             setPending([])
             break
+          case 'restarting':
+            // 서버가 곧 종료 → systemd가 ~10초 뒤 재기동, onclose 재접속 루프가 다시 붙는다
+            setEvents(list => [...list, { type: 'notice', text: '서비스 재시작 중… (약 10초 후 자동 재접속, 같은 세션으로 이어짐)' }])
+            break
           case 'sessions':
             setSessions(ev.items || [])
             break
@@ -116,5 +120,6 @@ export function useAgentChat(enabled = true) {
     interrupt: () => send({ type: 'interrupt' }),
     close: () => send({ type: 'close' }),
     refreshSessions: () => send({ type: 'sessions' }),
+    restart: () => send({ type: 'restart' }),
   }
 }

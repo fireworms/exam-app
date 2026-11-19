@@ -21,7 +21,7 @@ _BASH_DENY: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bDELETE\s+FROM\s+\w+\s*(;|$|\"|')", re.I), "WHERE 없는 DELETE 금지"),
     (re.compile(r"\bvercel\b.*(--prod\b|\benv\s+(rm|remove)\b|\b(project|projects)\s+(rm|remove)\b)"),
      "수동 prod 배포/환경변수 삭제 금지 — 배포는 master push로"),
-    (re.compile(r"\bsystemctl\s+(stop|disable|mask|restart|kill)\s+\S*exam-agent"), "에이전트 서비스 자신을 끊는 명령 금지 — 터미널에서"),
+    (re.compile(r"\bsystemctl\s+(stop|disable|mask|restart|kill)\s+\S*exam-agent"), "에이전트 서비스 자신을 끊는 명령 금지 — 화면의 '재시작' 버튼 사용"),
     (re.compile(r"\bsystemctl\s+(stop|disable|mask)\b"), "서비스 정지/비활성화 금지"),
     (re.compile(r"(:8009\b|\b8009/tcp)"), "에이전트 포트(8009) 조작 금지 — 대화가 끊긴다"),
     (re.compile(r"\b(pkill|killall)\b[^|;&]*\b(uvicorn|python|claude)\b"), "uvicorn/python 일괄 종료 금지 — 에이전트까지 죽는다. 8008은 lsof -ti:8008로"),

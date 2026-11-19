@@ -112,6 +112,12 @@ export default function Agent() {
           {chat.state === 'running' && (
             <button onClick={chat.interrupt} className="ag-btn ag-danger">중단</button>
           )}
+          {chat.socketOpen && chat.state !== 'running' && (
+            <button
+              onClick={() => { if (window.confirm('exam-agent 서비스를 재시작할까요?\n(에이전트 코드 수정 반영용 — 이 세션에서 띄운 8008도 함께 꺼집니다)')) chat.restart() }}
+              className="ag-btn"
+            >재시작</button>
+          )}
           <button onClick={() => { chat.refreshSessions(); setShowSessions(v => !v) }} className="ag-btn">세션</button>
         </div>
       </div>
@@ -183,6 +189,8 @@ export default function Agent() {
                   {e.terminal_reason && e.terminal_reason !== 'completed' ? ` · ${e.terminal_reason}` : ''}
                 </div>
               )
+            case 'notice':
+              return <div key={i} className="ag-sub" style={{ color: 'var(--accent2)' }}>↻ {e.text}</div>
             case 'error':
               return <div key={i} className="ag-err">⚠ {e.message}</div>
             default:

@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -38,15 +39,38 @@ SESSIONS_DIR = (Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".clau
 _PERMISSION_TIMEOUT_S = 600
 _IDLE_DISCONNECT_S = 30 * 60
 _LOG_CAP = 400
-# 셀프 재시작(웹 버튼) 전후로 이어 쓸 세션 ID — 재시작 후 같은 대화로 resume
+# 자동 셀프 재시작 전후로 이어 쓸 세션 ID — 재시작 후 같은 대화로 resume
 _LAST_SESSION_FILE = Path.home() / ".cache" / "exam-agent" / "last_session"
+
+# 이 서비스 자신이 import하는 코드 — 턴 중에 바뀌면 턴 종료 후 자동 재시작해 반영한다.
+# (Edit 도구뿐 아니라 sed·git pull 등 어떤 경로로 바뀌어도 잡히도록 mtime 비교)
+_BACKEND = PROJECT_ROOT / "backend"
+
+
+def _watched_files() -> list[Path]:
+    files = [_BACKEND / "agent_main.py", _BACKEND / "auth.py", _BACKEND / "requirements.txt"]
+    files += sorted((_BACKEND / "agent").glob("*.py"))
+    return files
+
+
+def _snapshot() -> dict[str, float]:
+    out = {}
+    for f in _watched_files():
+        try:
+            out[str(f)] = f.stat().st_mtime
+        except OSError:
+            pass
+    return out
+
+
+_BOOT_SNAPSHOT = _snapshot()
 _PREVIEW_CHARS = 1500
 
 _APPEND_PROMPT = (
     "이 세션은 모바일 웹 UI(exam-agent, :8009)를 통해 진행된다. 대화형 터미널이 없다.\n"
     "- AskUserQuestion 도구는 쓸 수 없다. 선택이 필요하면 본문에 번호 목록으로 묻는다.\n"
     "- 화면이 좁다. 답변은 짧게, 표는 3열 이하로.\n"
-    "- exam-agent(이 서비스) 재시작이 필요하면(backend/agent*·auth.py 수정 후) 사용자에게 화면 상단 '재시작' 버튼을 누르라고 안내한다. 직접 systemctl·8009 kill·`pkill uvicorn`은 차단돼 있다. 재시작하면 같은 세션으로 이어지지만, 이 세션에서 띄운 8008도 함께 죽는다.\n"
+    "- exam-agent(이 서비스) 코드(backend/agent_main.py·agent/*.py·auth.py·requirements.txt)를 고치면 이 턴이 끝난 뒤 import 검사를 거쳐 자동 재시작되고 같은 세션으로 이어진다. 직접 재시작하지 말 것 (systemctl·8009 kill·`pkill uvicorn`은 차단). 재시작 시 이 세션에서 띄운 8008도 함께 꺼진다.\n"
     "- 8008 로컬 백엔드 재기동(`scripts/dev-server-stop.sh` → `scripts/dev-server-start.sh`)은 이 세션에 영향이 없다.\n"
     "- SessionStart/End 훅(settings.local.json)은 이 세션에선 돌지 않는다 — 8008이 필요하면 직접 띄운다.\n"
     "- prod 반영은 커밋 후 `git push origin master` (Vercel 자동배포). 수동 vercel --prod는 차단돼 있다."
@@ -311,6 +335,45 @@ class AgentHub:
             self._client = None
         finally:
             await self._set_state("idle" if self._client is not None else "disconnected")
+            # 별도 태스크로 — close()가 _turn_task(지금 이 태스크)를 cancel하므로 안에서 돌면 재시작 전에 끊긴다
+            asyncio.create_task(self._maybe_auto_restart())
+
+    async def _maybe_auto_restart(self) -> None:
+        """턴 동안 에이전트 자신의 코드가 바뀌었으면 import 검사 후 셀프 재시작.
+
+        exit(1) → systemd Restart=on-failure가 재기동 (sudo 불필요). 깨진 코드로 재시작하면
+        크래시 루프에 빠져 모바일에선 복구할 길이 없으므로, 새 프로세스로 import가 되는지 먼저 본다.
+        실패하면 재시작하지 않고 남겨 둔다 (다음 턴 종료 때 다시 검사 — 고치면 그때 반영).
+        """
+        global _BOOT_SNAPSHOT
+        now = _snapshot()
+        changed = [Path(f).name for f in now if now[f] != _BOOT_SNAPSHOT.get(f)]
+        if not changed or self.state == "running" or self._pending:
+            return
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-c", "import agent_main",
+            cwd=str(_BACKEND), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
+        except asyncio.TimeoutError:
+            proc.kill()
+            out = b"import check timeout (60s)"
+        if proc.returncode != 0:
+            tail = out.decode(errors="ignore").strip().splitlines()[-6:]
+            await self._emit({"type": "error", "message":
+                              f"에이전트 코드 변경({', '.join(changed)}) — import 실패로 자동 재시작 보류. "
+                              "고치면 다음 턴 끝에 재시작됩니다.\n" + "\n".join(tail)})
+            _BOOT_SNAPSHOT = now   # 같은 실패를 매 턴 반복 보고하지 않게. 다시 고치면 mtime이 또 바뀐다
+            return
+        if self.state == "running" or self._pending:   # import 검사 사이에 새 메시지가 들어와 응답 중
+            return                                     # 스냅샷은 그대로 → 그 턴이 끝나면 다시 시도
+        await self._emit({"type": "notice", "text":
+                          f"에이전트 코드 변경({', '.join(changed)}) — 서비스 재시작 중… 약 10초 후 같은 세션으로 재접속"})
+        if not await self.prepare_restart():
+            return
+        logger.info("auto self-restart: %s", changed)
+        asyncio.get_running_loop().call_later(0.5, os._exit, 1)
 
     # ------------------------------------------------------------ 권한
     async def _guard_hook(self, input_data, tool_use_id, context) -> dict[str, Any]:

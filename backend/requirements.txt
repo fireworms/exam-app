@@ -10,3 +10,5 @@ pydantic==2.13.3
 httpx==0.28.1
 starlette==1.0.0
 supabase==2.30.0
+# 웹 에이전트(exam-agent, 로컬 전용) — pyproject.toml에는 넣지 말 것: prod(Vercel)는 agent_main을 import하지 않는다
+claude-agent-sdk==0.2.179

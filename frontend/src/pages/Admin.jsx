@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { agentAvailable } from '../hooks/useAgentChat'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import UploadPage from './UploadPage'
 import { UploadLogs, ExamManager } from './LogsPage'
@@ -277,6 +278,11 @@ export default function Admin() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>관리자</h1>
+        {agentAvailable() && (
+          // 에이전트는 별도 서비스(:8009)라 같은 호스트의 다른 포트로 이동
+          <a href={`http://${window.location.hostname}:8009/agent`}
+            style={{ ...btnStyle, fontSize: 12, marginLeft: 'auto', marginRight: 8, textDecoration: 'none' }}>🤖 에이전트</a>
+        )}
         <button onClick={() => { sessionStorage.removeItem('_adm'); setUnlocked(false) }}
           style={{ ...btnStyle, fontSize: 12 }}>잠금</button>
       </div>

@@ -28,3 +28,4 @@ frontend/dist/
 data/
 backend/fix_circle_markers.py
 .vercel
+backend/agent/__pycache__/

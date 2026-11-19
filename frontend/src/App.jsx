@@ -12,6 +12,7 @@ import SessionReview from './pages/SessionReview'
 import Vocab from './pages/Vocab'
 import Login from './pages/Login'
 import ResetPassword from './pages/ResetPassword'
+import Agent from './pages/Agent'
 import { supabase } from './supabase'
 import './index.css'
 
@@ -32,6 +33,8 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        {/* 웹 에이전트 — Layout·PrivateRoute 밖 (자체 로그인, :8009 exam-agent 전용) */}
+        <Route path="/agent" element={<Agent />} />
         <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
           <Route index element={<Home />} />
           <Route path="quiz" element={<QuizWithKey />} />

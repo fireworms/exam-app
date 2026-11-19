@@ -16,7 +16,8 @@ supabase.auth.onAuthStateChange((event, session) => {
   if (event === 'SIGNED_OUT') {
     sessionStorage.removeItem('_adm')  // 로그아웃/만료 시 관리자 잠금 해제
   }
-  if (!session && !window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/reset-password')) {
+  // /agent는 자체 로그인 폼이 있다 (:8009엔 /login이 쓰는 /api가 없음)
+  if (!session && !['/login', '/reset-password', '/agent'].some(p => window.location.pathname.startsWith(p))) {
     window.location.href = '/login'
   }
 })

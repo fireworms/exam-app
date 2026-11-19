@@ -65,6 +65,8 @@ nohup uvicorn main:app --host 0.0.0.0 --port 8008 > /tmp/backend.log 2>&1 &
 | `frontend/src/axios.js` | axios 인터셉터 (JWT 주입, tokenReady 대기) |
 | `frontend/src/tts.js` | TTS 유틸 — `speak()`, `useSpeaking()` 훅 |
 | `frontend/src/pages/` | 페이지 컴포넌트 |
+| `backend/agent_main.py`, `backend/agent/` | 웹 에이전트 서비스 (exam-agent :8009) — 아래 '웹 에이전트' 참조 |
+| `deploy/exam-agent.service` | 웹 에이전트 systemd 유닛 (8008 백엔드용 아님) |
 
 ---
 
@@ -247,6 +249,7 @@ exam_vocab          id, user_id, word, type(word|phrase), pos, meaning, example,
 | `/vocab` | Vocab | 단어장 목록 (품사·기출 N회+ 필터, 최신/알파벳/기출/오답률/정답률 정렬, 뜻 가리기, 4지선다 미니 퀴즈 — URL 파라미터 유지) |
 | `/settings` | Settings | auto_remove_wrong 설정 |
 | `/upload`, `/logs` | — | `/admin`으로 리다이렉트 |
+| `/agent` | Agent | 웹 에이전트 (Layout 밖, 자체 로그인) — :8009에서만 동작, 관리자 헤더 🤖 링크 |
 
 메뉴: 홈 / 오답노트 / 스크랩 / 통계 / 설정 / 🔐 관리자  
 CSS 변수: `--bg`, `--bg2`, `--bg3`, `--border`, `--text`, `--text2`, `--accent`, `--correct`, `--wrong`, `--scrap`  
@@ -309,3 +312,20 @@ AI 파서가 공통지문 문제를 `(N번 공통지문 문제)` 형태로 마�
 - 단어장 미니 퀴즈(`components/VocabQuiz.jsx`, `utils/vocabQuiz.js`): 현재 필터 범위에서 무한 출제, 오답·미풀이 단어 가중. 오답 선지는 단어장 다른 단어 뜻(같은 품사 우선)
 - 단어장 목록: 초기 1회 fetch 후 필터·정렬은 클라이언트 `useMemo` 처리. 다른 탭 저장 감지는 `BroadcastChannel('vocab_update')`
 - TTS(`tts.js`): 한글/영어 구간 분리 후 각각 ko-KR·en-US로 큐 읽기. `__밑줄__` 마크업·3개 이상 언더스코어·원문자 전처리 제거
+
+---
+
+## 웹 에이전트 — 모바일에서 Claude Code 대화 (2026-11-19)
+
+trading_system 웹 에이전트를 이식. 폰 → `http://<tailscale-ip>:8009/agent` ↔ `exam-agent` 서비스(`backend/agent_main.py`) ↔ `claude-agent-sdk` ↔ 서버 Claude Code CLI (cwd=프로젝트 루트, CLAUDE.md·메모리 로드)
+
+- **8008 백엔드와 별도 프로세스**: 에이전트가 8008을 kill/재기동해도 자기는 안 죽게. 반대로 **exam-agent 재시작·8009 kill·`pkill uvicorn`은 대화를 끊는다** → guard 차단
+- **systemd 유닛은 에이전트 전용** — "systemd 금지" 규칙은 8008 백엔드(크래시 루프 전력) 얘기. 8008은 계속 on-demand. 에이전트 세션에선 SessionStart/End 훅(settings.local.json)이 안 돌므로 8008이 필요하면 에이전트가 직접 띄운다
+- **`main.py`를 import하지 않는다**: main의 `load_dotenv`가 `ANTHROPIC_API_KEY`를 환경에 올리면 CLI가 구독 대신 API 과금으로 붙는다(크레딧 0). 그래서 :8009엔 `/api`가 없고, `/agent` 페이지는 supabase-js `signInWithPassword`로 직접 로그인. `axios.js`의 `/login` 리다이렉트에서 `/agent` 제외
+- **prod(Vercel, https)에선 못 쓴다** — 로컬 `ws://`가 mixed content로 막힘. `agentAvailable()`(http 접속)일 때만 관리자 헤더에 링크 노출
+- 인증: Supabase JWT(첫 WS 메시지, URL 아님) + 이메일 == `AGENT_OWNER_EMAIL`. `AGENT_ENABLED=true` 없으면 거부 (`backend/.env`, 공개 레포 클론 보호)
+- 권한 2겹: ① `agent/guard.py` PreToolUse 훅 — 승인 눌러도 거부 (rm -r/-f, 강제 push, reset --hard, DROP/TRUNCATE, 수동 `vercel --prod`, systemctl stop, 8009/uvicorn 일괄 kill, `.env`) → ② 나머지는 CLI 설정대로, 물을 땐 웹 승인 카드 (10분 무응답 = 거부). **정규식 실수 방지이지 샌드박스가 아니다**
+- `setting_sources=["user","project"]` — `settings.local.json`의 넓은 허용 규칙(`python3 *`, `git *`)이 웹에선 무승인 실행이 되므로 안 읽는다
+- 허브는 WS보다 오래 산다 (화면 꺼져도 턴 유지, 재접속 시 로그 재전송), 30분 유휴면 CLI만 내리고 resume. 같은 세션을 터미널·웹 동시 사용 금지
+- `claude-agent-sdk`는 `requirements.txt`에만 — prod는 agent_main을 import하지 않으므로 pyproject에 넣지 말 것
+- 설치: `sudo cp deploy/exam-agent.service /etc/systemd/system/` → `--host`를 `tailscale ip -4` 값으로 수정(레포엔 0.0.0.0, 실 IP 커밋 금지) → `sudo systemctl daemon-reload && sudo systemctl enable --now exam-agent`. dist는 디스크에서 바로 서빙하므로 `npm run build`만 하면 반영

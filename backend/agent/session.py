@@ -64,6 +64,60 @@ def _snapshot() -> dict[str, float]:
 
 
 _BOOT_SNAPSHOT = _snapshot()
+_DEFER_POLL_S = 30
+
+
+def _service_procs() -> list[tuple[int, int, str]] | None:
+    """이 서비스 cgroup의 프로세스 (pid, ppid, cmdline). systemd 서비스로 돌 때만 — 수동 실행이면
+    cgroup이 사용자 세션 전체라 무관한 프로세스가 섞이므로 None (검사 생략)."""
+    try:
+        path = Path("/proc/self/cgroup").read_text().strip().split("::", 1)[1]
+    except (OSError, IndexError):
+        return None
+    if not path.endswith("/exam-agent.service"):
+        return None
+    try:
+        pids = Path(f"/sys/fs/cgroup{path}/cgroup.procs").read_text().split()
+    except OSError:
+        return None
+    out = []
+    for p in pids:
+        try:
+            stat = Path(f"/proc/{p}/stat").read_text()
+            ppid = int(stat.rsplit(")", 1)[1].split()[1])
+            cmd = Path(f"/proc/{p}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="ignore").strip()
+            out.append((int(p), ppid, cmd))
+        except (OSError, ValueError, IndexError):
+            pass
+    return out
+
+
+def _background_jobs() -> tuple[list[str], bool]:
+    """재시작하면 같이 죽을 프로세스 → (막는 작업 목록, 8008 개발 서버 실행 여부).
+
+    유휴 CLI는 자식이 없다(실측) — 그래서 자기 자신과 CLI를 뺀 나머지는 에이전트가 남긴 작업이다.
+    8008 uvicorn은 상주 서버라 막지 않고 재시작 후 다시 띄운다 (안 그러면 영원히 미뤄진다).
+    """
+    procs = _service_procs()
+    if procs is None:
+        return [], False
+    me = os.getpid()
+    parent = {pid: ppid for pid, ppid, _ in procs}
+    ancestors, cur = set(), me
+    while cur in parent:            # 자기 자신 + 같은 cgroup 안의 조상 (래퍼 프로세스)
+        ancestors.add(cur)
+        cur = parent[cur]
+    blocking, dev_server = [], False
+    for pid, ppid, cmd in procs:
+        if pid in ancestors or (ppid == me and "claude" in cmd):
+            continue
+        if "uvicorn" in cmd and "8008" in cmd:
+            dev_server = True
+            continue
+        if "bash -c source" in cmd and "shell-snapshots" in cmd:
+            continue   # 백그라운드 명령을 감싼 셸 — 실제 작업(자식)으로 판단
+        blocking.append(cmd[:80])
+    return blocking, dev_server
 _PREVIEW_CHARS = 1500
 
 _APPEND_PROMPT = (
@@ -150,6 +204,7 @@ class AgentHub:
         self._lock = asyncio.Lock()
         self._last_activity = time.monotonic()
         self._reaper: asyncio.Task | None = None
+        self._defer_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------ 소켓
     async def attach(self, ws) -> None:
@@ -227,30 +282,39 @@ class AgentHub:
                 for ev in self._log:
                     await self._send(ws, ev)
 
-    async def prepare_restart(self) -> bool:
-        """셀프 재시작 직전 정리 — CLI를 내리고 세션 ID를 디스크에 남긴다. 응답 중이면 거부."""
+    async def prepare_restart(self, relaunch_dev_server: bool = False) -> bool:
+        """셀프 재시작 직전 정리 — CLI를 내리고 이어 쓸 상태를 디스크에 남긴다. 응답 중이면 거부."""
         if self.state == "running":
             return False
         sid = self.session_id
         await self.close()
-        if sid:
-            try:
-                _LAST_SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
-                _LAST_SESSION_FILE.write_text(sid)
-            except OSError as e:
-                logger.warning("last session save failed: %s", e)
+        try:
+            _LAST_SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _LAST_SESSION_FILE.write_text(json.dumps({"session_id": sid, "relaunch_8008": relaunch_dev_server}))
+        except OSError as e:
+            logger.warning("last session save failed: %s", e)
         return True
 
     def restore_last_session(self) -> None:
-        """재시작 후 첫 허브 생성 시 — 직전 세션을 대기 상태로 복원 (다음 메시지에서 resume)."""
+        """재시작 후 첫 허브 생성 시 — 직전 세션을 대기 상태로 복원 (다음 메시지에서 resume),
+        재시작 때 같이 죽은 8008 개발 서버는 다시 띄운다."""
         try:
-            sid = _LAST_SESSION_FILE.read_text().strip()
+            data = json.loads(_LAST_SESSION_FILE.read_text())
             _LAST_SESSION_FILE.unlink()
-        except OSError:
+        except (OSError, ValueError):
             return
+        sid = data.get("session_id")
         if sid:
             self.session_id = sid
             self._log = load_history_events(sid)
+        if data.get("relaunch_8008"):
+            try:
+                import subprocess
+                subprocess.Popen([str(PROJECT_ROOT / "scripts" / "dev-server-start.sh")],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self._log.append({"type": "notice", "text": "재시작 전에 떠 있던 8008 백엔드를 다시 띄웠습니다"})
+            except OSError as e:
+                logger.warning("8008 relaunch failed: %s", e)
 
     async def close(self) -> None:
         async with self._lock:
@@ -338,6 +402,14 @@ class AgentHub:
             # 별도 태스크로 — close()가 _turn_task(지금 이 태스크)를 cancel하므로 안에서 돌면 재시작 전에 끊긴다
             asyncio.create_task(self._maybe_auto_restart())
 
+    async def _wait_jobs_then_restart(self) -> None:
+        """백그라운드 작업이 끝날 때까지 폴링 — 다음 턴이 없어도 재시작되게."""
+        while True:
+            await asyncio.sleep(_DEFER_POLL_S)
+            if self.state != "running" and not self._pending and not _background_jobs()[0]:
+                break
+        await self._maybe_auto_restart()
+
     async def _maybe_auto_restart(self) -> None:
         """턴 동안 에이전트 자신의 코드가 바뀌었으면 import 검사 후 셀프 재시작.
 
@@ -349,6 +421,15 @@ class AgentHub:
         now = _snapshot()
         changed = [Path(f).name for f in now if now[f] != _BOOT_SNAPSHOT.get(f)]
         if not changed or self.state == "running" or self._pending:
+            return
+        blocking, dev_server = _background_jobs()
+        if blocking:
+            # 백그라운드 작업(백테스트·마이그레이션 등)이 재시작에 같이 죽지 않게 미룬다
+            if self._defer_task is None or self._defer_task.done():
+                await self._emit({"type": "notice", "text":
+                                  f"에이전트 코드 변경 — 백그라운드 작업 {len(blocking)}개가 끝나면 재시작합니다: "
+                                  + " / ".join(blocking[:3])})
+                self._defer_task = asyncio.create_task(self._wait_jobs_then_restart())
             return
         proc = await asyncio.create_subprocess_exec(
             sys.executable, "-c", "import agent_main",
@@ -370,7 +451,7 @@ class AgentHub:
             return                                     # 스냅샷은 그대로 → 그 턴이 끝나면 다시 시도
         await self._emit({"type": "notice", "text":
                           f"에이전트 코드 변경({', '.join(changed)}) — 서비스 재시작 중… 약 10초 후 같은 세션으로 재접속"})
-        if not await self.prepare_restart():
+        if not await self.prepare_restart(relaunch_dev_server=dev_server):
             return
         logger.info("auto self-restart: %s", changed)
         asyncio.get_running_loop().call_later(0.5, os._exit, 1)
